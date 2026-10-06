@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QTimer>
+#include <QDeadlineTimer>
 #include <QMap>
 #include <QMutex>
 #include <memory>
@@ -186,6 +187,13 @@ private:
     int m_lastRequestedWhiteBalance;
     bool m_whiteBalanceFallbackActive;
     int m_fallbackWhiteBalanceMode;
+    // AI mode switches are asynchronous on the camera (the Meet 2 keeps reporting the
+    // old ai_mode for ~1-1.5s after a disable). Until the camera confirms the requested
+    // mode or this deadline passes, status polls must not overwrite it.
+    QDeadlineTimer m_pendingAiDeadline;
+    int m_pendingAiMode = 0;
+    void expectAiMode(int aiMode);
+    bool aiModeMatchesPending(int reportedAiMode) const;
     bool isTiny2Family() const;
     void tryV4l2Fallback();
     void connectV4l2(const std::string &devicePath);

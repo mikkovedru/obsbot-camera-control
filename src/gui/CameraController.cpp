@@ -4,6 +4,10 @@
 #include <algorithm>
 
 static constexpr int kDefaultWhiteBalanceKelvin = 4800;
+// Measured on a Meet 2: ai_mode reflects a disable after 1.0-1.55s. Generous margin on top.
+static constexpr int kAiModeSwitchTimeoutMs = 4000;
+// Sentinel for expectAiMode(): accept any mode other than AiWorkModeNone.
+static constexpr int kAnyActiveAiMode = -1;
 
 CameraController::CameraController(QObject *parent)
     : QObject(parent)
@@ -94,6 +98,11 @@ void CameraController::connectToCamera(const QString &devicePath)
         } else {
             {
                 QMutexLocker locker(&m_connectionMutex);
+                if (m_v4l2Only) {
+                    // SDK discovery keeps running alongside a V4L2-only connection; an SDK
+                    // "device gone" event does not concern the V4L2 handle we actually use.
+                    return;
+                }
                 m_connected = false;
                 m_cameraInfo.connected = false;
             }
@@ -204,8 +213,11 @@ void CameraController::connectV4l2(const std::string &devicePath)
         return;
     }
 
-    Devices::get().close();
-
+    // Deliberately leave SDK discovery (Devices::get()) running. Closing it here would let
+    // the SDK's callback still hand us a Device whose status thread is gone: commands keep
+    // succeeding but cameraStatus() never updates again, so the UI would fight a frozen
+    // snapshot forever. Keeping discovery alive also lets the SDK upgrade this V4L2-only
+    // connection to a full one if it finds the camera later.
     m_v4l2DevicePath = QString::fromStdString(devicePath);
 
     std::string card = m_v4l2.cardName();
@@ -216,11 +228,10 @@ void CameraController::connectV4l2(const std::string &devicePath)
         card = "OBSBOT";
     QString displayName = QString::fromStdString(card) + QStringLiteral(" (V4L2)");
 
-    // Devices::get().close()/cardName() above can take noticeable wall-clock time, during
-    // which the SDK's background discovery thread may have won the race and already taken
-    // over (tearing down m_v4l2 and flipping m_v4l2Only back to false). Re-verify ownership
-    // immediately before committing any further shared state, so a late-finishing V4L2 path
-    // can never clobber a newer, more capable SDK connection.
+    // cardName() above does I/O, during which the SDK's background discovery thread may have
+    // won the race and already taken over (tearing down m_v4l2 and flipping m_v4l2Only back
+    // to false). Re-verify ownership immediately before committing any further shared state,
+    // so a late-finishing V4L2 path can never clobber a newer, more capable SDK connection.
     {
         QMutexLocker locker(&m_connectionMutex);
         if (!m_v4l2Only) {
@@ -374,6 +385,7 @@ bool CameraController::enableAutoFraming(bool enabled)
         // Restore auto focus when auto-framing is enabled
         setFocusAbsolute(0, true);
 
+        expectAiMode(kAnyActiveAiMode);
         m_currentState.autoFramingEnabled = true;
         emit stateChanged(m_currentState);
         return true;  // First command succeeded, second is pending
@@ -385,11 +397,27 @@ bool CameraController::enableAutoFraming(bool enabled)
             // Switch to manual focus when auto-framing is disabled
             setFocusAbsolute(m_currentState.manualFocusValue, false);
 
+            expectAiMode(static_cast<int>(Device::AiWorkModeNone));
             m_currentState.autoFramingEnabled = false;
+            m_currentState.aiMode = static_cast<int>(Device::AiWorkModeNone);
             emit stateChanged(m_currentState);
         }
         return success;
     }
+}
+
+void CameraController::expectAiMode(int aiMode)
+{
+    m_pendingAiMode = aiMode;
+    m_pendingAiDeadline.setRemainingTime(kAiModeSwitchTimeoutMs);
+}
+
+bool CameraController::aiModeMatchesPending(int reportedAiMode) const
+{
+    if (m_pendingAiMode == kAnyActiveAiMode) {
+        return reportedAiMode != Device::AiWorkModeNone;
+    }
+    return reportedAiMode == m_pendingAiMode;
 }
 
 bool CameraController::setAiMode(int mode, int subMode)
@@ -402,6 +430,7 @@ bool CameraController::setAiMode(int mode, int subMode)
     });
 
     if (success) {
+        expectAiMode(mode);
         m_currentState.aiMode = mode;
         m_currentState.aiSubMode = subMode;
         m_currentState.autoFramingEnabled = (mode != Device::AiWorkModeNone);
@@ -859,8 +888,16 @@ void CameraController::updateState()
 
     auto status = m_device->cameraStatus();
 
-    m_currentState.aiMode = status.tiny.ai_mode;
-    m_currentState.aiSubMode = status.tiny.ai_sub_mode;
+    const int reportedAiMode = status.tiny.ai_mode;
+    if (!m_pendingAiDeadline.hasExpired() && aiModeMatchesPending(reportedAiMode)) {
+        m_pendingAiDeadline.setPreciseRemainingTime(0); // Camera caught up with the request
+    }
+    if (m_pendingAiDeadline.hasExpired()) {
+        m_currentState.aiMode = reportedAiMode;
+        m_currentState.aiSubMode = status.tiny.ai_sub_mode;
+        m_currentState.autoFramingEnabled = (reportedAiMode != Device::AiWorkModeNone);
+    }
+    // Otherwise the camera is still switching modes; keep reporting the requested state.
     m_currentState.zoomRatio = status.tiny.zoom_ratio;
     // Derive zoom float from zoom_ratio (100 = 1.0x, 200 = 2.0x)
     if (status.tiny.zoom_ratio >= 100 && status.tiny.zoom_ratio <= 200) {
@@ -876,7 +913,6 @@ void CameraController::updateState()
     m_currentState.manualFocusValue = status.tiny.manual_focus_value;
     m_currentState.fovMode = status.tiny.fov;
     m_currentState.devStatus = status.tiny.dev_status;
-    m_currentState.autoFramingEnabled = (m_currentState.aiMode != Device::AiWorkModeNone);
     m_currentState.trackSpeedMode = status.tiny.ai_tracker_speed;
     m_currentState.audioAutoGainEnabled = status.tiny.audio_auto_gain;
 
