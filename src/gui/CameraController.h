@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QTimer>
 #include <QMap>
+#include <QMutex>
 #include <memory>
 #include <functional>
 #include <vector>
@@ -157,6 +158,10 @@ private:
     QTimer *m_v4l2ScanTimer = nullptr;
     QString m_v4l2DevicePath;
     CameraInfo m_cameraInfo;
+    // Guards m_connected/m_device/m_v4l2Only/m_cameraInfo against the SDK's
+    // background device-discovery thread racing with connectToCamera()'s
+    // synchronous V4L2 fallback path.
+    mutable QMutex m_connectionMutex;
     CameraState m_currentState;
     CameraState m_cachedState;  // Cache intended state during settling
     Config m_config;

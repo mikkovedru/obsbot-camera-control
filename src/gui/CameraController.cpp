@@ -58,20 +58,39 @@ void CameraController::connectToCamera(const QString &devicePath)
             auto dev_list = Devices::get().getDevList();
             auto dev = pickDevice(dev_list);
             if (dev) {
-                m_device = dev;
-                m_connected = true;
-                m_cameraInfo.name = QString::fromStdString(m_device->devName());
-                m_cameraInfo.serialNumber = QString::fromStdString(m_device->devSn());
-                m_cameraInfo.version = QString::fromStdString(m_device->devVersion());
-                m_cameraInfo.productType = m_device->productType();
-                m_cameraInfo.connected = true;
+                // The SDK path is strictly more capable than the V4L2 fallback and always
+                // wins the race; capture whether we need to tear down a prior V4L2 claim.
+                bool wasV4l2Only = false;
+                {
+                    QMutexLocker locker(&m_connectionMutex);
+                    wasV4l2Only = m_v4l2Only;
+                    m_device = dev;
+                    m_connected = true;
+                    m_v4l2Only = false;
+                    m_cameraInfo.name = QString::fromStdString(m_device->devName());
+                    m_cameraInfo.serialNumber = QString::fromStdString(m_device->devSn());
+                    m_cameraInfo.version = QString::fromStdString(m_device->devVersion());
+                    m_cameraInfo.productType = m_device->productType();
+                    m_cameraInfo.connected = true;
+                }
+                if (wasV4l2Only) {
+                    m_v4l2.close();
+                }
+                if (m_v4l2ScanTimer) {
+                    // This callback runs on the SDK's discovery thread; QTimer can only be
+                    // stopped from its owning thread, so hop back to the controller's thread.
+                    QMetaObject::invokeMethod(m_v4l2ScanTimer, &QTimer::stop, Qt::QueuedConnection);
+                }
                 refreshControlRanges();
                 emit cameraConnected(m_cameraInfo);
                 updateState();
             }
         } else {
-            m_connected = false;
-            m_cameraInfo.connected = false;
+            {
+                QMutexLocker locker(&m_connectionMutex);
+                m_connected = false;
+                m_cameraInfo.connected = false;
+            }
             resetControlRanges();
             emit cameraDisconnected();
         }
@@ -81,27 +100,50 @@ void CameraController::connectToCamera(const QString &devicePath)
     Devices::get().setEnableMdnsScan(false);
 
     auto dev_list = Devices::get().getDevList();
-    if (!dev_list.empty() && !m_connected) {
+    bool alreadyConnected;
+    {
+        QMutexLocker locker(&m_connectionMutex);
+        alreadyConnected = m_connected;
+    }
+    if (!dev_list.empty() && !alreadyConnected) {
         auto dev = pickDevice(dev_list);
         if (dev) {
-            m_device = dev;
-            m_connected = true;
-            m_cameraInfo.name = QString::fromStdString(m_device->devName());
-            m_cameraInfo.serialNumber = QString::fromStdString(m_device->devSn());
-            m_cameraInfo.version = QString::fromStdString(m_device->devVersion());
-            m_cameraInfo.productType = m_device->productType();
-            m_cameraInfo.connected = true;
-            refreshControlRanges();
-            emit cameraConnected(m_cameraInfo);
-            updateState();
+            bool claimed = false;
+            {
+                QMutexLocker locker(&m_connectionMutex);
+                if (!m_connected) {
+                    m_device = dev;
+                    m_connected = true;
+                    m_v4l2Only = false;
+                    m_cameraInfo.name = QString::fromStdString(m_device->devName());
+                    m_cameraInfo.serialNumber = QString::fromStdString(m_device->devSn());
+                    m_cameraInfo.version = QString::fromStdString(m_device->devVersion());
+                    m_cameraInfo.productType = m_device->productType();
+                    m_cameraInfo.connected = true;
+                    claimed = true;
+                }
+            }
+            if (claimed) {
+                refreshControlRanges();
+                emit cameraConnected(m_cameraInfo);
+                updateState();
+            }
         }
-    } else {
+    } else if (!alreadyConnected) {
         tryV4l2Fallback();
     }
 }
 
 void CameraController::tryV4l2Fallback()
 {
+    {
+        QMutexLocker locker(&m_connectionMutex);
+        if (m_connected) {
+            // The SDK may have won a race and connected first; don't downgrade to V4L2-only.
+            return;
+        }
+    }
+
     auto path = V4l2Backend::findObsbotDevice();
     if (!path.empty()) {
         connectV4l2(path);
@@ -112,8 +154,11 @@ void CameraController::tryV4l2Fallback()
         m_v4l2ScanTimer = new QTimer(this);
         m_v4l2ScanTimer->setSingleShot(false);
         connect(m_v4l2ScanTimer, &QTimer::timeout, this, [this]() {
-            if (m_connected)
-                return;
+            {
+                QMutexLocker locker(&m_connectionMutex);
+                if (m_connected)
+                    return;
+            }
             auto path = V4l2Backend::findObsbotDevice();
             if (!path.empty()) {
                 m_v4l2ScanTimer->stop();
@@ -126,13 +171,35 @@ void CameraController::tryV4l2Fallback()
 
 void CameraController::connectV4l2(const std::string &devicePath)
 {
+    {
+        QMutexLocker locker(&m_connectionMutex);
+        if (m_connected) {
+            // The SDK already connected (e.g. while we were scanning /dev); don't downgrade.
+            return;
+        }
+    }
+
     if (!m_v4l2.open(devicePath))
         return;
 
+    bool claimed = false;
+    {
+        QMutexLocker locker(&m_connectionMutex);
+        if (!m_connected) {
+            m_connected = true;
+            m_v4l2Only = true;
+            claimed = true;
+        }
+    }
+    if (!claimed) {
+        // The SDK won the race while we were opening the V4L2 device; abandon this path
+        // without touching global SDK discovery state.
+        m_v4l2.close();
+        return;
+    }
+
     Devices::get().close();
 
-    m_connected = true;
-    m_v4l2Only = true;
     m_v4l2DevicePath = QString::fromStdString(devicePath);
 
     std::string card = m_v4l2.cardName();
@@ -141,11 +208,24 @@ void CameraController::connectV4l2(const std::string &devicePath)
         card = card.substr(0, colon);
     if (card.empty())
         card = "OBSBOT";
-    m_cameraInfo.name = QString::fromStdString(card) + QStringLiteral(" (V4L2)");
-    m_cameraInfo.serialNumber = QString();
-    m_cameraInfo.version = QString();
-    m_cameraInfo.productType = -1;
-    m_cameraInfo.connected = true;
+    QString displayName = QString::fromStdString(card) + QStringLiteral(" (V4L2)");
+
+    // Devices::get().close()/cardName() above can take noticeable wall-clock time, during
+    // which the SDK's background discovery thread may have won the race and already taken
+    // over (tearing down m_v4l2 and flipping m_v4l2Only back to false). Re-verify ownership
+    // immediately before committing any further shared state, so a late-finishing V4L2 path
+    // can never clobber a newer, more capable SDK connection.
+    {
+        QMutexLocker locker(&m_connectionMutex);
+        if (!m_v4l2Only) {
+            return;
+        }
+        m_cameraInfo.name = displayName;
+        m_cameraInfo.serialNumber = QString();
+        m_cameraInfo.version = QString();
+        m_cameraInfo.productType = -1;
+        m_cameraInfo.connected = true;
+    }
 
     refreshV4l2ControlRanges();
 
