@@ -4,6 +4,34 @@
 #include <QLabel>
 #include <algorithm>
 
+namespace {
+
+// Maps the SDK's shutter index (cameraSetExposureAbsolute's shutter_time parameter,
+// per DevShutterTimeType) to a human-readable shutter speed.
+QString shutterTimeLabel(int value)
+{
+    static const char *kLabels[] = {
+        "1/8000s", "1/6400s", "1/5000s", "1/4000s", "1/3200s", "1/2500s", "1/2000s",
+        "1/1600s", "1/1250s", "1/1000s", "1/800s", "1/640s", "1/500s", "1/400s",
+        "1/320s", "1/240s", "1/200s", "1/160s", "1/120s", "1/100s", "1/80s",
+        "1/60s", "1/50s", "1/40s", "1/30s", "1/25s", "1/20s", "1/15s", "1/12.5s",
+        "1/10s", "1/8s", "1/6.25s", "1/5s", "1/4s", "1/3s", "1/2.5s", "1/2s"
+    };
+    constexpr int kFirstIndex = 9;
+    constexpr int kCount = static_cast<int>(sizeof(kLabels) / sizeof(kLabels[0]));
+
+    if (value == 0) {
+        return QStringLiteral("Auto");
+    }
+    const int offset = value - kFirstIndex;
+    if (offset >= 0 && offset < kCount) {
+        return QString::fromLatin1(kLabels[offset]);
+    }
+    return QString::number(value);
+}
+
+} // namespace
+
 CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget *parent)
     : QWidget(parent)
     , m_controller(controller)
@@ -138,6 +166,37 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     m_whiteBalanceKelvinLabel->setEnabled(false);
     wbKelvinLayout->addWidget(m_whiteBalanceKelvinLabel);
     imageLayout->addLayout(wbKelvinLayout);
+
+    // Exposure
+    QHBoxLayout *exposureLayout = new QHBoxLayout();
+    m_exposureAutoCheckBox = new QCheckBox("Auto", this);
+    m_exposureAutoCheckBox->setToolTip("Enable automatic exposure (disables manual shutter control)");
+    connect(m_exposureAutoCheckBox, &QCheckBox::toggled, this, &CameraSettingsWidget::onExposureAutoToggled);
+    exposureLayout->addWidget(m_exposureAutoCheckBox);
+    exposureLayout->addWidget(new QLabel("Exposure:", this));
+    m_exposureSlider = new QSlider(Qt::Horizontal, this);
+    m_exposureSlider->setRange(1, 100);
+    m_exposureSlider->setToolTip("Adjust manual shutter value");
+    connect(m_exposureSlider, &QSlider::valueChanged, this, &CameraSettingsWidget::onExposureChanged);
+    exposureLayout->addWidget(m_exposureSlider, 1);
+    m_exposureValueLabel = new QLabel("1/30s", this);
+    m_exposureValueLabel->setMinimumWidth(56);
+    exposureLayout->addWidget(m_exposureValueLabel);
+    imageLayout->addLayout(exposureLayout);
+
+    // ISO / Gain
+    QHBoxLayout *isoLayout = new QHBoxLayout();
+    isoLayout->addWidget(new QLabel("ISO:", this));
+    m_isoSlider = new QSlider(Qt::Horizontal, this);
+    m_isoSlider->setRange(1, 64);
+    m_isoSlider->setToolTip("Adjust sensor gain / ISO (lower = less noise, higher = brighter in low light). "
+                            "ISO value shown is approximated from OBSBOT's published 100-6400 range.");
+    connect(m_isoSlider, &QSlider::valueChanged, this, &CameraSettingsWidget::onISOChanged);
+    isoLayout->addWidget(m_isoSlider, 1);
+    m_isoValueLabel = new QLabel("ISO 100", this);
+    m_isoValueLabel->setMinimumWidth(56);
+    isoLayout->addWidget(m_isoValueLabel);
+    imageLayout->addLayout(isoLayout);
 
     layout->addWidget(imageGroupBox);
     layout->addStretch();
@@ -282,6 +341,34 @@ void CameraSettingsWidget::onWhiteBalanceKelvinChanged(int value)
     m_commandTimer->start(1000);
 }
 
+void CameraSettingsWidget::onExposureAutoToggled(bool checked)
+{
+    m_userInitiated = true;
+    m_exposureSlider->setEnabled(!checked);
+    m_controller->setExposureAuto(checked);
+    if (!checked) {
+        // Re-assert the current slider value now that manual mode is active
+        m_controller->setExposure(m_exposureSlider->value());
+    }
+    m_commandTimer->start(1000);
+}
+
+void CameraSettingsWidget::onExposureChanged(int value)
+{
+    updateExposureValueLabel(value);
+    m_userInitiated = true;
+    m_controller->setExposure(value);
+    m_commandTimer->start(1000);
+}
+
+void CameraSettingsWidget::onISOChanged(int value)
+{
+    updateISOValueLabel(value);
+    m_userInitiated = true;
+    m_controller->setISO(value);
+    m_commandTimer->start(1000);
+}
+
 void CameraSettingsWidget::updateFromState(const CameraController::CameraState &state)
 {
     applyControlRanges();
@@ -315,6 +402,14 @@ void CameraSettingsWidget::updateFromState(const CameraController::CameraState &
             m_faceFocusCheckBox->blockSignals(false);
         }
 
+        // Exposure auto is a real hardware feature (unlike brightness/contrast/saturation), so sync it
+        if (m_exposureAutoCheckBox->isChecked() != state.exposureAuto) {
+            m_exposureAutoCheckBox->blockSignals(true);
+            m_exposureAutoCheckBox->setChecked(state.exposureAuto);
+            m_exposureAutoCheckBox->blockSignals(false);
+            m_exposureSlider->setEnabled(!state.exposureAuto);
+        }
+
         // Image controls - DON'T update auto checkboxes from camera state
         // These are UI-only flags (camera doesn't have auto brightness/contrast/saturation)
         // The checkboxes are only updated via user interaction or config load
@@ -339,6 +434,20 @@ void CameraSettingsWidget::updateFromState(const CameraController::CameraState &
             m_saturationSlider->blockSignals(true);
             m_saturationSlider->setValue(state.saturation);
             m_saturationSlider->blockSignals(false);
+        }
+
+        if (m_exposureSlider->value() != state.exposure) {
+            m_exposureSlider->blockSignals(true);
+            m_exposureSlider->setValue(state.exposure);
+            m_exposureSlider->blockSignals(false);
+            updateExposureValueLabel(state.exposure);
+        }
+
+        if (m_isoSlider->value() != state.iso) {
+            m_isoSlider->blockSignals(true);
+            m_isoSlider->setValue(state.iso);
+            m_isoSlider->blockSignals(false);
+            updateISOValueLabel(state.iso);
         }
     }
 
@@ -403,6 +512,12 @@ void CameraSettingsWidget::applyControlRanges()
                QStringLiteral("Adjust image contrast (%1-%2)"));
     applyRange(m_controller->getSaturationRange(), m_saturationSlider, m_saturationRangeApplied,
                QStringLiteral("Adjust color saturation (%1-%2)"));
+    applyRange(m_controller->getExposureRange(), m_exposureSlider, m_exposureRangeApplied,
+               QStringLiteral("Adjust manual shutter value (%1-%2)"));
+    updateExposureValueLabel(m_exposureSlider->value());
+    applyRange(m_controller->getISORange(), m_isoSlider, m_isoRangeApplied,
+               QStringLiteral("Adjust sensor gain / ISO (%1-%2)"));
+    updateISOValueLabel(m_isoSlider->value());
 
     const auto wbRange = m_controller->getWhiteBalanceKelvinRange();
     if (wbRange.valid) {
@@ -430,5 +545,23 @@ void CameraSettingsWidget::updateWhiteBalanceKelvinLabel(int value)
 {
     if (m_whiteBalanceKelvinLabel) {
         m_whiteBalanceKelvinLabel->setText(QString::number(value) + QStringLiteral(" K"));
+    }
+}
+
+void CameraSettingsWidget::updateExposureValueLabel(int value)
+{
+    if (m_exposureValueLabel) {
+        m_exposureValueLabel->setText(shutterTimeLabel(value));
+    }
+}
+
+void CameraSettingsWidget::updateISOValueLabel(int value)
+{
+    if (m_isoValueLabel) {
+        // The SDK/V4L2 gain control is a raw 1-64 step value. OBSBOT's published spec lists
+        // the Meet-series ISO range as 100-6400, which lines up exactly with gain*100
+        // (gain=1 -> ISO 100 base sensitivity, gain=64 -> ISO 6400). This isn't a value
+        // documented by the SDK itself, so it's an inferred-but-consistent approximation.
+        m_isoValueLabel->setText(QStringLiteral("ISO %1").arg(value * 100));
     }
 }

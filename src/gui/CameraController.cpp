@@ -14,6 +14,12 @@ CameraController::CameraController(QObject *parent)
     m_cachedState = {};
     m_currentState.whiteBalanceKelvin = 5000;
     m_cachedState.whiteBalanceKelvin = 5000;
+    m_currentState.exposureAuto = true;
+    m_currentState.exposure = 33;
+    m_currentState.iso = 1;
+    m_cachedState.exposureAuto = true;
+    m_cachedState.exposure = 33;
+    m_cachedState.iso = 1;
     m_lastRequestedWhiteBalance = static_cast<int>(Device::DevWhiteBalanceAuto);
     m_whiteBalanceFallbackActive = false;
     m_fallbackWhiteBalanceMode = static_cast<int>(Device::DevWhiteBalanceAuto);
@@ -246,6 +252,8 @@ void CameraController::refreshV4l2ControlRanges()
     m_contrastRange = convert(m_v4l2.getContrastRange());
     m_saturationRange = convert(m_v4l2.getSaturationRange());
     m_whiteBalanceKelvinRange = convert(m_v4l2.getWhiteBalanceTemperatureRange());
+    m_exposureRange = convert(m_v4l2.getExposureAbsoluteRange());
+    m_isoRange = convert(m_v4l2.getGainRange());
 
     m_supportedWhiteBalanceTypes.clear();
     m_supportedWhiteBalanceTypes.push_back(static_cast<int>(Device::DevWhiteBalanceAuto));
@@ -281,6 +289,10 @@ void CameraController::updateV4l2State()
 
     m_currentState.autoFocusEnabled = m_v4l2.getAutoFocus();
     m_currentState.manualFocusValue = m_v4l2.getFocusAbsolute();
+
+    m_currentState.exposureAuto = m_v4l2.getAutoExposure();
+    m_currentState.exposure = clampToRange(m_v4l2.getExposureAbsolute(), m_exposureRange, 1, 100);
+    m_currentState.iso = clampToRange(m_v4l2.getGain(), m_isoRange, 1, 64);
 
     emit stateChanged(m_currentState);
 }
@@ -761,6 +773,71 @@ bool CameraController::setWhiteBalanceManual(int kelvin)
     return applyManualWhiteBalance(kelvin, static_cast<int>(Device::DevWhiteBalanceManual));
 }
 
+bool CameraController::setExposureAuto(bool enabled)
+{
+    if (!m_connected) return false;
+
+    int clamped = clampToRange(m_currentState.exposure, m_exposureRange, 1, 100);
+    bool success;
+    if (m_v4l2Only) {
+        success = m_v4l2.setAutoExposure(enabled);
+        if (success && !enabled) {
+            // Re-assert the last known shutter value when leaving auto mode
+            success = m_v4l2.setExposureAbsolute(clamped);
+        }
+    } else {
+        success = executeCommand("Set Exposure Mode", [this, clamped, enabled]() {
+            return m_device->cameraSetExposureAbsolute(clamped, enabled);
+        });
+    }
+    if (success) {
+        m_currentState.exposureAuto = enabled;
+        emit stateChanged(m_currentState);
+    }
+    return success;
+}
+
+bool CameraController::setExposure(int value)
+{
+    if (!m_connected) return false;
+    if (m_currentState.exposureAuto) return true; // Manual value is ignored while auto exposure is active
+
+    int clamped = clampToRange(value, m_exposureRange, 1, 100);
+    bool success;
+    if (m_v4l2Only) {
+        success = m_v4l2.setExposureAbsolute(clamped);
+    } else {
+        success = executeCommand("Set Exposure", [this, clamped]() {
+            return m_device->cameraSetExposureAbsolute(clamped, false);
+        });
+    }
+    if (success) {
+        m_currentState.exposure = clamped;
+        emit stateChanged(m_currentState);
+    }
+    return success;
+}
+
+bool CameraController::setISO(int value)
+{
+    if (!m_connected) return false;
+
+    int clamped = clampToRange(value, m_isoRange, 1, 64);
+    bool success;
+    if (m_v4l2Only) {
+        success = m_v4l2.setGain(clamped);
+    } else {
+        success = executeCommand("Set ISO", [this, clamped]() {
+            return m_device->cameraSetMAEIsoR(clamped);
+        });
+    }
+    if (success) {
+        m_currentState.iso = clamped;
+        emit stateChanged(m_currentState);
+    }
+    return success;
+}
+
 bool CameraController::executeCommand(const QString &description, std::function<int32_t()> command)
 {
     int32_t ret = command();
@@ -831,6 +908,18 @@ void CameraController::updateState()
         }
     }
 
+    // Exposure/ISO have genuine hardware auto/manual state, so read it directly (no preservation needed)
+    int32_t shutterValue;
+    bool autoExposure;
+    if (m_device->cameraGetExposureAbsolute(shutterValue, autoExposure) == 0) {
+        m_currentState.exposureAuto = autoExposure;
+        m_currentState.exposure = clampToRange(shutterValue, m_exposureRange, 1, 100);
+    }
+    int32_t isoValue;
+    if (m_device->cameraGetMAEIsoR(isoValue) == 0) {
+        m_currentState.iso = clampToRange(isoValue, m_isoRange, 1, 64);
+    }
+
     // Restore auto mode flags (not stored in camera)
     m_currentState.brightnessAuto = preservedBrightnessAuto;
     m_currentState.contrastAuto = preservedContrastAuto;
@@ -874,6 +963,8 @@ void CameraController::applyConfigToCamera()
     m_currentState.brightnessAuto = settings.brightnessAuto;
     m_currentState.contrastAuto = settings.contrastAuto;
     m_currentState.saturationAuto = settings.saturationAuto;
+    m_currentState.exposure = settings.exposure;
+    m_currentState.iso = settings.iso;
 
     // Apply all settings to the camera
     enableAutoFraming(settings.faceTracking);
@@ -905,6 +996,8 @@ void CameraController::applyConfigToCamera()
     } else {
         setWhiteBalance(settings.whiteBalance);
     }
+    setExposureAuto(settings.exposureAuto);
+    setISO(settings.iso);
 
     emit configLoaded();
 }
@@ -917,6 +1010,8 @@ void CameraController::applyCurrentStateToCamera(const CameraState &uiState)
     m_currentState.brightnessAuto = uiState.brightnessAuto;
     m_currentState.contrastAuto = uiState.contrastAuto;
     m_currentState.saturationAuto = uiState.saturationAuto;
+    m_currentState.exposure = uiState.exposure;
+    m_currentState.iso = uiState.iso;
 
     // Cache the intended state
     m_cachedState = uiState;
@@ -948,6 +1043,8 @@ void CameraController::applyCurrentStateToCamera(const CameraState &uiState)
     } else {
         setWhiteBalance(uiState.whiteBalance);
     }
+    setExposureAuto(uiState.exposureAuto);
+    setISO(uiState.iso);
 }
 
 void CameraController::saveCurrentStateToConfig()
@@ -980,6 +1077,9 @@ void CameraController::saveCurrentStateToConfig()
     settings.whiteBalance = m_currentState.whiteBalance;
     settings.whiteBalanceKelvin = m_currentState.whiteBalanceKelvin;
     settings.focus = m_currentState.autoFocusEnabled ? -1 : m_currentState.manualFocusValue;
+    settings.exposureAuto = m_currentState.exposureAuto;
+    settings.exposure = m_currentState.exposure;
+    settings.iso = m_currentState.iso;
 
     m_config.setSettings(settings);
 }
@@ -1015,6 +1115,8 @@ void CameraController::refreshControlRanges()
     fetchRange(&Device::cameraGetRangeImageContrastR, m_contrastRange);
     fetchRange(&Device::cameraGetRangeImageSaturationR, m_saturationRange);
     fetchRange(&Device::cameraGetRangeWhiteBalanceR, m_whiteBalanceKelvinRange);
+    fetchRange(&Device::cameraGetRangeExposureAbsolute, m_exposureRange);
+    fetchRange(&Device::cameraGetRangeMAEIsoR, m_isoRange);
 
     m_supportedWhiteBalanceTypes.clear();
     std::vector<int32_t> wbList;
@@ -1041,6 +1143,8 @@ void CameraController::resetControlRanges()
     m_contrastRange = {};
     m_saturationRange = {};
     m_whiteBalanceKelvinRange = {};
+    m_exposureRange = {};
+    m_isoRange = {};
     m_supportedWhiteBalanceTypes.clear();
     m_whiteBalanceFallbackActive = false;
     m_fallbackWhiteBalanceMode = static_cast<int>(Device::DevWhiteBalanceAuto);

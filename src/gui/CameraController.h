@@ -62,6 +62,9 @@ public:
         int saturation;      // 0-255
         int whiteBalance;    // 0=Auto, 1=Daylight, etc.
         int whiteBalanceKelvin; // Manual Kelvin value when white balance is manual
+        bool exposureAuto;   // Auto exposure mode (real hardware feature)
+        int exposure;        // Manual shutter value (camera-reported range)
+        int iso;             // Sensor gain/ISO value (camera-reported range)
 
         // Status
         int zoomRatio;
@@ -124,6 +127,11 @@ public:
     bool setWhiteBalance(int mode); // 0=Auto, 1=Daylight, etc.
     bool setWhiteBalanceManual(int kelvin);
 
+    // Exposure / ISO controls
+    bool setExposureAuto(bool enabled);
+    bool setExposure(int value);
+    bool setISO(int value);
+
     // Configuration
     bool loadConfig(std::vector<Config::ValidationError> &errors);
     bool saveConfig();
@@ -140,6 +148,8 @@ public:
     ParamRange getContrastRange() const { return m_contrastRange; }
     ParamRange getSaturationRange() const { return m_saturationRange; }
     ParamRange getWhiteBalanceKelvinRange() const { return m_whiteBalanceKelvinRange; }
+    ParamRange getExposureRange() const { return m_exposureRange; }
+    ParamRange getISORange() const { return m_isoRange; }
     const std::vector<int>& getSupportedWhiteBalanceTypes() const { return m_supportedWhiteBalanceTypes; }
 
 signals:
@@ -170,6 +180,8 @@ private:
     ParamRange m_contrastRange;
     ParamRange m_saturationRange;
     ParamRange m_whiteBalanceKelvinRange;
+    ParamRange m_exposureRange;
+    ParamRange m_isoRange;
     std::vector<int> m_supportedWhiteBalanceTypes;
     int m_lastRequestedWhiteBalance;
     bool m_whiteBalanceFallbackActive;

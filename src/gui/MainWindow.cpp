@@ -1255,6 +1255,9 @@ void MainWindow::loadConfiguration()
     m_settingsWidget->setContrast(settings.contrast);
     m_settingsWidget->setSaturationAuto(settings.saturationAuto);
     m_settingsWidget->setSaturation(settings.saturation);
+    m_settingsWidget->setExposureAuto(settings.exposureAuto);
+    m_settingsWidget->setExposure(settings.exposure);
+    m_settingsWidget->setISO(settings.iso);
     m_settingsWidget->setWhiteBalance(settings.whiteBalance);
     m_previewWidget->setPreferredFormatId(QString::fromStdString(settings.previewFormat));
 
@@ -1394,6 +1397,9 @@ CameraController::CameraState MainWindow::getUIState() const
     state.saturation = m_settingsWidget->getSaturation();
     state.whiteBalance = m_settingsWidget->getWhiteBalance();
     state.whiteBalanceKelvin = m_settingsWidget->getWhiteBalanceKelvin();
+    state.exposureAuto = m_settingsWidget->isExposureAuto();
+    state.exposure = m_settingsWidget->getExposure();
+    state.iso = m_settingsWidget->getISO();
 
     // Get PTZ state from controller (defaults from config)
     auto currentState = m_controller->getCurrentState();
