@@ -82,6 +82,38 @@ constexpr VirtualCameraResolutionPreset kVirtualCameraResolutionPresets[] = {
     {"1920x1080", 1920, 1080}
 };
 
+struct VirtualCameraFrameRatePreset {
+    const char *key;
+    int fps;
+};
+
+constexpr VirtualCameraFrameRatePreset kVirtualCameraFrameRatePresets[] = {
+    {"match", 0},
+    {"15", 15},
+    {"24", 24},
+    {"30", 30}
+};
+
+QString buildFrameRateLabel(const VirtualCameraFrameRatePreset &preset)
+{
+    if (preset.fps <= 0) {
+        return MainWindow::tr("Match capture rate");
+    }
+
+    return MainWindow::tr("%1 fps").arg(preset.fps);
+}
+
+int frameRateForKey(const QString &key)
+{
+    if (key.isEmpty() || key.compare(QStringLiteral("match"), Qt::CaseInsensitive) == 0) {
+        return 0;
+    }
+
+    bool ok = false;
+    const int fps = key.toInt(&ok);
+    return (ok && fps > 0) ? fps : 0;
+}
+
 QString buildResolutionLabel(const VirtualCameraResolutionPreset &preset)
 {
     if (preset.width <= 0 || preset.height <= 0) {
@@ -153,6 +185,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_virtualCameraCheckbox(nullptr)
     , m_virtualCameraDeviceEdit(nullptr)
     , m_virtualCameraResolutionCombo(nullptr)
+    , m_virtualCameraFrameRateCombo(nullptr)
     , m_virtualCameraStatusLabel(nullptr)
     , m_snapshotDirectoryEdit(nullptr)
     , m_effectsWidget(nullptr)
@@ -493,6 +526,31 @@ void MainWindow::setupUI()
     virtualResolutionHint->setWordWrap(true);
     virtualResolutionHint->setStyleSheet("color: palette(mid); font-size: 11px;");
     virtualLayout->addWidget(virtualResolutionHint);
+
+    QHBoxLayout *virtualFrameRateLayout = new QHBoxLayout();
+    virtualFrameRateLayout->setContentsMargins(0, 0, 0, 0);
+    virtualFrameRateLayout->setSpacing(8);
+
+    QLabel *virtualFrameRateLabel = new QLabel(tr("Output frame rate"), virtualCameraGroup);
+    virtualFrameRateLayout->addWidget(virtualFrameRateLabel);
+
+    m_virtualCameraFrameRateCombo = new QComboBox(virtualCameraGroup);
+    m_virtualCameraFrameRateCombo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    for (const auto &preset : kVirtualCameraFrameRatePresets) {
+        const QString key = QLatin1String(preset.key);
+        const QString label = buildFrameRateLabel(preset);
+        m_virtualCameraFrameRateCombo->addItem(label, key);
+    }
+    connect(m_virtualCameraFrameRateCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &MainWindow::onVirtualCameraFrameRateChanged);
+    virtualFrameRateLayout->addWidget(m_virtualCameraFrameRateCombo, 1);
+
+    virtualLayout->addLayout(virtualFrameRateLayout);
+
+    QLabel *virtualFrameRateHint = new QLabel(tr("Cap the frame rate sent to apps like Teams/Zoom — useful since some camera resolutions only expose a high-fps preview option."), virtualCameraGroup);
+    virtualFrameRateHint->setWordWrap(true);
+    virtualFrameRateHint->setStyleSheet("color: palette(mid); font-size: 11px;");
+    virtualLayout->addWidget(virtualFrameRateHint);
     scrollLayout->addWidget(virtualCameraGroup);
 
     QGroupBox *snapshotGroup = new QGroupBox(tr("Snapshots"), scrollContent);
@@ -1221,6 +1279,16 @@ void MainWindow::updateVirtualCameraStreamerState()
     const QSize forcedSize = resolutionSizeForKey(resolutionKey);
     m_virtualCameraStreamer->setForcedResolution(forcedSize);
 
+    QString frameRateKey;
+    if (m_virtualCameraFrameRateCombo && m_virtualCameraFrameRateCombo->currentIndex() >= 0) {
+        frameRateKey = m_virtualCameraFrameRateCombo->currentData().toString();
+    }
+    if (frameRateKey.isEmpty()) {
+        const int savedFps = m_controller->getConfig().getSettings().virtualCameraMaxFps;
+        frameRateKey = savedFps > 0 ? QString::number(savedFps) : QStringLiteral("match");
+    }
+    m_virtualCameraStreamer->setMaxFrameRate(frameRateForKey(frameRateKey));
+
     const bool userRequested = m_virtualCameraCheckbox && m_virtualCameraCheckbox->isChecked();
     const bool previewActive = m_previewWidget && m_previewWidget->isPreviewEnabled();
     const bool enableOutput = userRequested && previewActive && m_virtualCameraAvailable;
@@ -1318,6 +1386,23 @@ void MainWindow::loadConfiguration()
             m_virtualCameraResolutionCombo->setCurrentIndex(index);
         }
         m_virtualCameraResolutionCombo->blockSignals(false);
+    }
+
+    if (m_virtualCameraFrameRateCombo) {
+        const QString key = settings.virtualCameraMaxFps > 0
+            ? QString::number(settings.virtualCameraMaxFps)
+            : QStringLiteral("match");
+        m_virtualCameraFrameRateCombo->blockSignals(true);
+        int index = m_virtualCameraFrameRateCombo->findData(key);
+        if (index < 0) {
+            const QString label = tr("%1 fps").arg(settings.virtualCameraMaxFps);
+            m_virtualCameraFrameRateCombo->addItem(label, key);
+            index = m_virtualCameraFrameRateCombo->count() - 1;
+        }
+        if (index >= 0) {
+            m_virtualCameraFrameRateCombo->setCurrentIndex(index);
+        }
+        m_virtualCameraFrameRateCombo->blockSignals(false);
     }
 
     m_virtualCameraErrorNotified = false;
@@ -1880,6 +1965,28 @@ void MainWindow::onVirtualCameraResolutionChanged(int index)
     m_controller->saveConfig();
 
     m_virtualCameraErrorNotified = false;
+    updateVirtualCameraStreamerState();
+}
+
+void MainWindow::onVirtualCameraFrameRateChanged(int index)
+{
+    if (!m_virtualCameraFrameRateCombo || index < 0) {
+        return;
+    }
+
+    const QString key = m_virtualCameraFrameRateCombo->itemData(index).toString();
+    const int fps = frameRateForKey(key);
+
+    auto settings = m_controller->getConfig().getSettings();
+    if (fps == settings.virtualCameraMaxFps) {
+        updateVirtualCameraStreamerState();
+        return;
+    }
+
+    settings.virtualCameraMaxFps = fps;
+    m_controller->getConfig().setSettings(settings);
+    m_controller->saveConfig();
+
     updateVirtualCameraStreamerState();
 }
 

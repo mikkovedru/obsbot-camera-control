@@ -63,6 +63,7 @@ private slots:
     void onVirtualCameraToggled(bool enabled);
     void onVirtualCameraDeviceEdited();
     void onVirtualCameraResolutionChanged(int index);
+    void onVirtualCameraFrameRateChanged(int index);
     void onVirtualCameraError(const QString &message);
     void onVideoEffectsChanged(const FilterPreviewWidget::VideoEffectsSettings &settings);
     void onSnapshotCaptured(const QImage &image);
@@ -119,6 +120,7 @@ private:
     QCheckBox *m_virtualCameraCheckbox;
     QLineEdit *m_virtualCameraDeviceEdit;
     QComboBox *m_virtualCameraResolutionCombo;
+    QComboBox *m_virtualCameraFrameRateCombo;
     QLabel *m_virtualCameraStatusLabel;
     QLineEdit *m_snapshotDirectoryEdit;
 
