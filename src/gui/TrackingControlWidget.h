@@ -61,6 +61,7 @@ private slots:
     void onXYPadChanged(float x, float y);
     void onZoomChanged(int value);
     void onFocusChanged(int value);
+    void onResetManualControls();
 
 private:
     CameraController *m_controller;

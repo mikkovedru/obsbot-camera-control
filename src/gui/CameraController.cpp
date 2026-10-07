@@ -367,6 +367,23 @@ bool CameraController::enableAutoFraming(bool enabled)
 {
     if (!m_connected || m_v4l2Only) return false;
 
+    // Invalidate a still-pending delayed "set AutoFraming mode" from an earlier call so it
+    // cannot re-enable tracking after this call turned it off (or fire twice).
+    const int generation = ++m_autoFramingGeneration;
+
+    if (isTiny2Family()) {
+        // MediaMode/AutoFraming are Meet-series commands; Tiny 2 is driven by its AI mode alone.
+        if (!enabled) {
+            return setAiMode(static_cast<int>(Device::AiWorkModeNone), 0);
+        }
+        int mode = m_currentState.aiMode;
+        if (mode == static_cast<int>(Device::AiWorkModeNone)) {
+            mode = static_cast<int>(Device::AiWorkModeHuman);
+        }
+        const int subMode = (mode == static_cast<int>(Device::AiWorkModeHuman)) ? m_currentState.aiSubMode : 0;
+        return setAiMode(mode, subMode);
+    }
+
     if (enabled) {
         // Step 1: Set MediaMode to AutoFrame
         if (!executeCommand("Set MediaMode to AutoFrame", [this]() {
@@ -375,8 +392,10 @@ bool CameraController::enableAutoFraming(bool enabled)
             return false;
         }
 
-        // Step 2: Set auto-framing mode after a brief delay (non-blocking)
-        QTimer::singleShot(500, [this]() {
+        // Step 2: Set auto-framing mode after a brief delay (non-blocking). The camera only
+        // starts tracking once this arrives, so skip it if tracking was toggled again meanwhile.
+        QTimer::singleShot(500, this, [this, generation]() {
+            if (generation != m_autoFramingGeneration || !m_connected || !m_device) return;
             executeCommand("Set AutoFraming mode", [this]() {
                 return m_device->cameraSetAutoFramingModeU(Device::AutoFrmSingle, Device::AutoFrmUpperBody);
             });
@@ -1003,7 +1022,16 @@ void CameraController::applyConfigToCamera()
     m_currentState.iso = settings.iso;
 
     // Apply all settings to the camera
-    enableAutoFraming(settings.faceTracking);
+    if (isTiny2Family()) {
+        // The AI mode is the single source of truth on Tiny 2; faceTracking only gates it
+        int mode = settings.faceTracking ? settings.aiMode : static_cast<int>(Device::AiWorkModeNone);
+        if (settings.faceTracking && mode == static_cast<int>(Device::AiWorkModeNone)) {
+            mode = static_cast<int>(Device::AiWorkModeHuman);
+        }
+        setAiMode(mode, mode == static_cast<int>(Device::AiWorkModeHuman) ? settings.aiSubMode : 0);
+    } else {
+        enableAutoFraming(settings.faceTracking);
+    }
     setHDR(settings.hdr);
     setFOV(settings.fov);
     setFaceAE(settings.faceAE);
@@ -1017,7 +1045,6 @@ void CameraController::applyConfigToCamera()
     }
 
     if (isTiny2Family()) {
-        setAiMode(settings.aiMode, settings.aiSubMode);
         setAutoZoom(settings.autoZoom);
         setTrackSpeed(settings.trackSpeed);
         setAudioAutoGain(settings.audioAutoGain);
@@ -1056,12 +1083,17 @@ void CameraController::applyCurrentStateToCamera(const CameraState &uiState)
     beginSettling(2000);
 
     // Apply the current UI state to camera (respects user changes)
-    enableAutoFraming(uiState.autoFramingEnabled);
     if (isTiny2Family()) {
-        setAiMode(uiState.aiMode, uiState.aiSubMode);
+        int mode = uiState.autoFramingEnabled ? uiState.aiMode : static_cast<int>(Device::AiWorkModeNone);
+        if (uiState.autoFramingEnabled && mode == static_cast<int>(Device::AiWorkModeNone)) {
+            mode = static_cast<int>(Device::AiWorkModeHuman);
+        }
+        setAiMode(mode, mode == static_cast<int>(Device::AiWorkModeHuman) ? uiState.aiSubMode : 0);
         setAutoZoom(uiState.autoZoomEnabled);
         setTrackSpeed(uiState.trackSpeedMode);
         setAudioAutoGain(uiState.audioAutoGainEnabled);
+    } else {
+        enableAutoFraming(uiState.autoFramingEnabled);
     }
     setHDR(uiState.hdrEnabled);
     setFOV(uiState.fovMode);

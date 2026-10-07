@@ -2,6 +2,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPushButton>
 #include <algorithm>
 
 namespace {
@@ -198,8 +199,66 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     isoLayout->addWidget(m_isoValueLabel);
     imageLayout->addLayout(isoLayout);
 
+    QPushButton *resetButton = new QPushButton("Reset to Defaults", this);
+    resetButton->setToolTip("Restore HDR, field of view, face AE/focus and all image controls to their defaults");
+    connect(resetButton, &QPushButton::clicked, this, &CameraSettingsWidget::resetToDefaults);
+    imageLayout->addWidget(resetButton);
+
     layout->addWidget(imageGroupBox);
     layout->addStretch();
+}
+
+void CameraSettingsWidget::resetToDefaults()
+{
+    m_userInitiated = true;
+
+    setHDREnabled(false);
+    m_controller->setHDR(false);
+    setFOVMode(0);
+    m_controller->setFOV(0);
+    setFaceAEEnabled(false);
+    m_controller->setFaceAE(false);
+    setFaceFocusEnabled(false);
+    m_controller->setFaceFocus(false);
+
+    // The manual setters are no-ops while the auto flag is set, so drop it
+    // first, push the neutral value, then restore auto.
+    const int neutral = 128;
+    auto resetAutoControl = [&](const CameraController::ParamRange &range,
+                                void (CameraController::*setAuto)(bool),
+                                bool (CameraController::*setValue)(int),
+                                void (CameraSettingsWidget::*setWidgetAuto)(bool),
+                                void (CameraSettingsWidget::*setWidgetValue)(int)) {
+        const int value = range.valid ? range.defaultValue : neutral;
+        (m_controller->*setAuto)(false);
+        (m_controller->*setValue)(value);
+        (m_controller->*setAuto)(true);
+        (this->*setWidgetValue)(value);
+        (this->*setWidgetAuto)(true);
+    };
+    resetAutoControl(m_controller->getBrightnessRange(), &CameraController::setBrightnessAuto,
+                     &CameraController::setBrightness, &CameraSettingsWidget::setBrightnessAuto,
+                     &CameraSettingsWidget::setBrightness);
+    resetAutoControl(m_controller->getContrastRange(), &CameraController::setContrastAuto,
+                     &CameraController::setContrast, &CameraSettingsWidget::setContrastAuto,
+                     &CameraSettingsWidget::setContrast);
+    resetAutoControl(m_controller->getSaturationRange(), &CameraController::setSaturationAuto,
+                     &CameraController::setSaturation, &CameraSettingsWidget::setSaturationAuto,
+                     &CameraSettingsWidget::setSaturation);
+
+    const int wbAuto = static_cast<int>(Device::DevWhiteBalanceAuto);
+    setWhiteBalance(wbAuto);
+    m_controller->setWhiteBalance(wbAuto);
+
+    setExposureAuto(true);
+    m_controller->setExposureAuto(true);
+
+    const auto isoRange = m_controller->getISORange();
+    const int isoDefault = isoRange.valid ? isoRange.defaultValue : 1;
+    setISO(isoDefault);
+    m_controller->setISO(isoDefault);
+
+    m_commandTimer->start(1000);
 }
 
 void CameraSettingsWidget::onHDRToggled(bool checked)

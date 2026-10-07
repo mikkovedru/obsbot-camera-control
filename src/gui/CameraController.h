@@ -192,6 +192,7 @@ private:
     // mode or this deadline passes, status polls must not overwrite it.
     QDeadlineTimer m_pendingAiDeadline;
     int m_pendingAiMode = 0;
+    int m_autoFramingGeneration = 0;  // Bumped per enableAutoFraming() call to cancel stale delayed commands
     void expectAiMode(int aiMode);
     bool aiModeMatchesPending(int reportedAiMode) const;
     bool isTiny2Family() const;

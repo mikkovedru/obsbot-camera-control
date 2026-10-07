@@ -132,6 +132,9 @@ public:
         updateISOValueLabel(value);
     }
 
+    // Restore all advanced and image controls to factory defaults and push them to the camera
+    void resetToDefaults();
+
 private slots:
     void onHDRToggled(bool checked);
     void onFOVChanged(int index);

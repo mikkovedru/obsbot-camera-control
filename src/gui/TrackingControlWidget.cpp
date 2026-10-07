@@ -1,5 +1,6 @@
 #include "TrackingControlWidget.h"
 #include <QLabel>
+#include <QPushButton>
 #include <dev/dev.hpp>
 
 TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidget *parent)
@@ -186,6 +187,11 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     m_positionLabel->setStyleSheet("color: palette(mid); font-size: 11px;");
     ptzGroupLayout->addWidget(m_positionLabel);
 
+    QPushButton *resetButton = new QPushButton(tr("Reset to Defaults"), this);
+    resetButton->setToolTip(tr("Center the camera, reset zoom to 1.0x and switch focus back to auto"));
+    connect(resetButton, &QPushButton::clicked, this, &TrackingControlWidget::onResetManualControls);
+    ptzGroupLayout->addWidget(resetButton);
+
     ptzContainerLayout->addWidget(ptzGroupBox);
     layout->addWidget(m_ptzContainer);
 
@@ -257,9 +263,9 @@ void TrackingControlWidget::onTrackingToggled(bool checked)
         }
 
         m_controller->setAiMode(checked ? modeValue : Device::AiWorkModeNone, subMode);
+    } else {
+        m_controller->enableAutoFraming(checked);
     }
-
-    m_controller->enableAutoFraming(checked);
 
     // Update PTZ controls state (disable when auto-framing is on)
     updatePTZControlsState();
@@ -529,6 +535,31 @@ void TrackingControlWidget::onFocusChanged(int value)
     m_dirtyFocus = true;
     m_focusLabel->setText(QString::number(value));
     scheduleFlush();
+}
+
+void TrackingControlWidget::onResetManualControls()
+{
+    // Drop anything queued by the throttle so it cannot overwrite the reset
+    m_controlThrottle->stop();
+    m_dirtyPanTilt = m_dirtyZoom = m_dirtyFocus = false;
+    m_pendingPan = 0;
+    m_pendingTilt = 0;
+    m_pendingZoom = 100;
+
+    m_xyPad->setPosition(0, 0);
+    m_positionLabel->setText("Position: Pan 0.00, Tilt 0.00");
+    {
+        QSignalBlocker blocker(m_zoomSlider);
+        m_zoomSlider->setValue(100);
+    }
+    m_zoomLabel->setText("1.00x");
+
+    m_controller->setPanTilt(0.0, 0.0);
+    m_controller->setZoom(1.0);
+    // Keep the slider where it is; it only takes effect once the user moves it again
+    m_controller->setFocusAbsolute(m_focusSlider->value(), true);
+
+    m_commandTimer->start(1000);
 }
 
 void TrackingControlWidget::setV4l2Mode(bool v4l2Only)
