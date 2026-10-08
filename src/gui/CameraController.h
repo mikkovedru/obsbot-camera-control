@@ -155,6 +155,7 @@ private:
     bool m_v4l2Only = false;
     V4l2Backend m_v4l2;
     QTimer *m_v4l2ScanTimer = nullptr;
+    QTimer *m_sdkDetectTimer = nullptr;  // Grace period before V4L2 fallback
     QString m_v4l2DevicePath;
     CameraInfo m_cameraInfo;
     CameraState m_currentState;

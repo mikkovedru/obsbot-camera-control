@@ -4,6 +4,7 @@
 #include <algorithm>
 
 static constexpr int kDefaultWhiteBalanceKelvin = 4800;
+static constexpr int kSdkDetectGraceMs = 8000;
 
 CameraController::CameraController(QObject *parent)
     : QObject(parent)
@@ -95,8 +96,19 @@ void CameraController::connectToCamera(const QString &devicePath)
             emit cameraConnected(m_cameraInfo);
             updateState();
         }
-    } else {
-        tryV4l2Fallback();
+    } else if (!m_connected) {
+        // The SDK enumerates devices on a background thread and can take
+        // several seconds to report a camera. Falling back to V4L2 closes the
+        // SDK for good, so give it time to show up via onDevChanged first.
+        if (!m_sdkDetectTimer) {
+            m_sdkDetectTimer = new QTimer(this);
+            m_sdkDetectTimer->setSingleShot(true);
+            connect(m_sdkDetectTimer, &QTimer::timeout, this, [this]() {
+                if (!m_connected)
+                    tryV4l2Fallback();
+            });
+        }
+        m_sdkDetectTimer->start(kSdkDetectGraceMs);
     }
 }
 
@@ -207,6 +219,9 @@ void CameraController::updateV4l2State()
 
 void CameraController::disconnectFromCamera()
 {
+    if (m_sdkDetectTimer)
+        m_sdkDetectTimer->stop();
+
     if (m_connected) {
         if (m_v4l2Only) {
             m_v4l2.close();
