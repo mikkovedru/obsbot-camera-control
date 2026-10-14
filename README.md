@@ -26,11 +26,13 @@ A native Qt6 application for controlling OBSBOT cameras on Linux. Provides full 
 - **Pan/Tilt/Zoom (PTZ)** - Precise camera positioning with center reset
 - **Auto-Framing** - AI-powered face tracking with single/upper body modes
 - **Image Settings** - Brightness, contrast, saturation with auto/manual modes
+- **Exposure & ISO** - Auto or manual shutter speed (shown as e.g. 1/30s) and ISO (sensor gain). ISO control has only been verified on the Meet 2.
 - **Field of View** - Wide (86°), Medium (78°), Narrow (65°)
 - **HDR** - High Dynamic Range for better exposure
 - **Face AE/Focus** - Face-based auto exposure and auto focus
-- **Autofocus** - Enabled by default, with an independent toggle and manual-focus slider in the tracking tab. Changing face tracking does not change the focus mode.
+- **Autofocus** - Enabled by default, with an independent toggle and manual-focus slider in the Tracking tab. Changing face tracking does not change the focus mode.
 - **White Balance** - Multiple presets (auto, daylight, fluorescent, etc.)
+- **Reset to Defaults** - One click to re-center the camera (1.0x zoom, autofocus on) or to restore the default image settings (HDR, FOV, face AE/focus, image controls including exposure and ISO)
 
 ### Live Preview
 - **Camera Preview** - Real-time video preview with automatic aspect ratio detection
@@ -160,6 +162,7 @@ The build script automatically:
   ```
 - The app shows whether the virtual camera device exists and gives setup guidance directly in the UI.
 - Once the module is active, toggle **Virtual Camera → Enable virtual camera output** inside the app to feed OBS/Zoom/Meet.
+- Use **Virtual Camera → Output frame rate** to cap the feed at 15, 24 or 30 fps. The default, **Match capture rate**, forwards every captured frame, which is often 60 fps at 1080p. Conferencing apps rarely need more than 30 fps.
 
 ### Model-Specific Extras
 - OBSBOT Tiny 2 family cameras expose additional controls (voice command toggles, LED brightness, microphone pickup distance) through the SDK.
@@ -206,9 +209,15 @@ contrast=128
 saturation_auto=enabled
 saturation=128
 white_balance=auto
+exposure_auto=enabled
+exposure=33
+iso=1
 
 # Application Settings
 start_minimized=disabled
+
+# Virtual Camera
+virtual_camera_max_fps=0
 ```
 
 ### Manual Editing
@@ -218,6 +227,8 @@ start_minimized=disabled
 - Pan/Tilt: `-1.0` to `1.0` (0 is center)
 - Focus: `-1` for autofocus (default), or `0` to `100` for manual focus. Saved manual-focus settings are preserved.
 - Brightness/Contrast/Saturation: `0` to `255`
+- Exposure/ISO: `exposure` (manual shutter, used only when `exposure_auto=disabled`) and `iso` (sensor gain) use the range reported by the camera. Out-of-range values are clamped. On the Meet 2 in SDK mode, `exposure` is `10` to `42` and `iso` is `1` to `64`.
+- Virtual camera frame rate: `virtual_camera_max_fps=0` matches the capture rate (default). Any positive value caps the output; the app offers `15`, `24` and `30`.
 
 ## Technical Details
 
