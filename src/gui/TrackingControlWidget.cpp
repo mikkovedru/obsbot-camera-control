@@ -106,6 +106,34 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
 
     layout->addWidget(m_trackingGroupBox);
 
+    QGroupBox *focusGroupBox = new QGroupBox(tr("Focus"), this);
+    focusGroupBox->setFlat(true);
+    QVBoxLayout *focusGroupLayout = new QVBoxLayout(focusGroupBox);
+    focusGroupLayout->setContentsMargins(16, 16, 16, 16);
+    focusGroupLayout->setSpacing(12);
+
+    m_autoFocusCheckBox = new QCheckBox(tr("Autofocus"), this);
+    m_autoFocusCheckBox->setObjectName("autoFocusCheckBox");
+    m_autoFocusCheckBox->setChecked(true);
+    m_autoFocusCheckBox->setToolTip(tr("Keep the camera in focus independently of face tracking"));
+    connect(m_autoFocusCheckBox, &QCheckBox::toggled, this, &TrackingControlWidget::onAutoFocusToggled);
+    focusGroupLayout->addWidget(m_autoFocusCheckBox);
+
+    QHBoxLayout *focusLayout = new QHBoxLayout();
+    focusLayout->addWidget(new QLabel(tr("Manual focus:"), this));
+    m_focusSlider = new QSlider(Qt::Horizontal, this);
+    m_focusSlider->setObjectName("manualFocusSlider");
+    m_focusSlider->setRange(0, 100);
+    m_focusSlider->setValue(50);
+    m_focusSlider->setEnabled(false);
+    connect(m_focusSlider, &QSlider::valueChanged, this, &TrackingControlWidget::onFocusChanged);
+    focusLayout->addWidget(m_focusSlider);
+    m_focusLabel = new QLabel("50", this);
+    m_focusLabel->setMinimumWidth(40);
+    focusLayout->addWidget(m_focusLabel);
+    focusGroupLayout->addLayout(focusLayout);
+    layout->addWidget(focusGroupBox);
+
     // Manual PTZ Controls (disabled when auto-framing is enabled)
     m_ptzContainer = new QWidget(this);
     QVBoxLayout *ptzContainerLayout = new QVBoxLayout(m_ptzContainer);
@@ -141,22 +169,6 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     m_zoomLabel->setMinimumWidth(40);
     zoomLayout->addWidget(m_zoomLabel);
     leftColumn->addLayout(zoomLayout);
-
-    // Focus slider
-    QHBoxLayout *focusLayout = new QHBoxLayout();
-    QLabel *focusLabel = new QLabel("Focus:", this);
-    focusLabel->setFixedWidth(40);
-    focusLayout->addWidget(focusLabel);
-    m_focusSlider = new QSlider(Qt::Horizontal, this);
-    m_focusSlider->setMinimum(0);
-    m_focusSlider->setMaximum(100);
-    m_focusSlider->setValue(50);
-    connect(m_focusSlider, &QSlider::valueChanged, this, &TrackingControlWidget::onFocusChanged);
-    focusLayout->addWidget(m_focusSlider);
-    m_focusLabel = new QLabel("50", this);
-    m_focusLabel->setMinimumWidth(40);
-    focusLayout->addWidget(m_focusLabel);
-    leftColumn->addLayout(focusLayout);
 
     // Invert controls checkbox
     m_invertControlsCheckBox = new QCheckBox(tr("Invert controls"), this);
@@ -239,6 +251,18 @@ void TrackingControlWidget::setAudioAutoGain(bool enabled)
 {
     QSignalBlocker blocker(m_audioGainCheckBox);
     m_audioGainCheckBox->setChecked(enabled);
+}
+
+void TrackingControlWidget::setFocusSettings(int focus)
+{
+    QSignalBlocker autoFocusBlocker(m_autoFocusCheckBox);
+    QSignalBlocker focusBlocker(m_focusSlider);
+    m_autoFocusCheckBox->setChecked(focus < 0);
+    if (focus >= 0) {
+        m_focusSlider->setValue(focus);
+        m_focusLabel->setText(QString::number(m_focusSlider->value()));
+    }
+    m_focusSlider->setEnabled(!m_autoFocusCheckBox->isChecked());
 }
 
 void TrackingControlWidget::onTrackingToggled(bool checked)
@@ -354,8 +378,11 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
         }
     }
 
-    // Sync focus slider from camera state (only when user isn't dragging)
+    // Sync focus mode and position without sending commands back to the camera.
     if (!m_focusSlider->isSliderDown() && !commandInFlight && !isSettling) {
+        QSignalBlocker autoFocusBlocker(m_autoFocusCheckBox);
+        m_autoFocusCheckBox->setChecked(state.autoFocusEnabled);
+        m_focusSlider->setEnabled(!state.autoFocusEnabled);
         if (m_focusSlider->value() != state.manualFocusValue) {
             m_focusSlider->blockSignals(true);
             m_focusSlider->setValue(state.manualFocusValue);
@@ -531,10 +558,24 @@ void TrackingControlWidget::onZoomChanged(int value)
 
 void TrackingControlWidget::onFocusChanged(int value)
 {
+    if (m_autoFocusCheckBox->isChecked()) return;
     m_pendingFocus = value;
     m_dirtyFocus = true;
     m_focusLabel->setText(QString::number(value));
     scheduleFlush();
+}
+
+void TrackingControlWidget::onAutoFocusToggled(bool checked)
+{
+    // A queued manual-focus command must not disable autofocus after this toggle.
+    m_dirtyFocus = false;
+    m_commandTimer->start(1000);
+    if (!m_controller->setFocusAbsolute(m_focusSlider->value(), checked)) {
+        const auto state = m_controller->getCurrentState();
+        QSignalBlocker blocker(m_autoFocusCheckBox);
+        m_autoFocusCheckBox->setChecked(state.autoFocusEnabled);
+    }
+    m_focusSlider->setEnabled(!m_autoFocusCheckBox->isChecked());
 }
 
 void TrackingControlWidget::onResetManualControls()
@@ -556,8 +597,9 @@ void TrackingControlWidget::onResetManualControls()
 
     m_controller->setPanTilt(0.0, 0.0);
     m_controller->setZoom(1.0);
-    // Keep the slider where it is; it only takes effect once the user moves it again
-    m_controller->setFocusAbsolute(m_focusSlider->value(), true);
+    if (m_controller->setFocusAbsolute(m_focusSlider->value(), true)) {
+        setFocusSettings(-1);
+    }
 
     m_commandTimer->start(1000);
 }

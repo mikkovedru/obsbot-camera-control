@@ -29,6 +29,7 @@ A native Qt6 application for controlling OBSBOT cameras on Linux. Provides full 
 - **Field of View** - Wide (86°), Medium (78°), Narrow (65°)
 - **HDR** - High Dynamic Range for better exposure
 - **Face AE/Focus** - Face-based auto exposure and auto focus
+- **Autofocus** - Enabled by default, with an independent toggle and manual-focus slider in the tracking tab. Changing face tracking does not change the focus mode.
 - **White Balance** - Multiple presets (auto, daylight, fluorescent, etc.)
 
 ### Live Preview
@@ -192,6 +193,7 @@ hdr=disabled
 fov=wide
 face_ae=enabled
 face_focus=enabled
+focus=-1
 zoom=1.0
 pan=0.0
 tilt=0.0
@@ -214,6 +216,7 @@ start_minimized=disabled
 - FOV values: `wide`/`medium`/`narrow` or `0`/`1`/`2`
 - Zoom: `1.0` to `2.0`
 - Pan/Tilt: `-1.0` to `1.0` (0 is center)
+- Focus: `-1` for autofocus (default), or `0` to `100` for manual focus. Saved manual-focus settings are preserved.
 - Brightness/Contrast/Saturation: `0` to `255`
 
 ## Technical Details

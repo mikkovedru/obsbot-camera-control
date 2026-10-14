@@ -16,6 +16,8 @@ CameraController::CameraController(QObject *parent)
 {
     m_currentState = {};
     m_cachedState = {};
+    m_currentState.autoFocusEnabled = true;
+    m_cachedState.autoFocusEnabled = true;
     m_currentState.whiteBalanceKelvin = 5000;
     m_cachedState.whiteBalanceKelvin = 5000;
     m_currentState.exposureAuto = true;
@@ -401,9 +403,6 @@ bool CameraController::enableAutoFraming(bool enabled)
             });
         });
 
-        // Restore auto focus when auto-framing is enabled
-        setFocusAbsolute(0, true);
-
         expectAiMode(kAnyActiveAiMode);
         m_currentState.autoFramingEnabled = true;
         emit stateChanged(m_currentState);
@@ -413,9 +412,6 @@ bool CameraController::enableAutoFraming(bool enabled)
             return m_device->cameraSetMediaModeU(Device::MediaModeNormal);
         });
         if (success) {
-            // Switch to manual focus when auto-framing is disabled
-            setFocusAbsolute(m_currentState.manualFocusValue, false);
-
             expectAiMode(static_cast<int>(Device::AiWorkModeNone));
             m_currentState.autoFramingEnabled = false;
             m_currentState.aiMode = static_cast<int>(Device::AiWorkModeNone);
@@ -632,8 +628,11 @@ bool CameraController::setFocusAbsolute(int position, bool autoFocus)
 
     bool success;
     if (m_v4l2Only) {
-        m_v4l2.setAutoFocus(autoFocus);
-        success = autoFocus || m_v4l2.setFocusAbsolute(position);
+        success = m_v4l2.setAutoFocus(autoFocus) &&
+                  (autoFocus || m_v4l2.setFocusAbsolute(position));
+        if (!success) {
+            emit commandFailed("Set Focus", -1);
+        }
     } else {
         success = executeCommand("Set Focus", [this, position, autoFocus]() {
             return m_device->cameraSetFocusAbsolute(position, autoFocus);
@@ -641,7 +640,13 @@ bool CameraController::setFocusAbsolute(int position, bool autoFocus)
     }
     if (success) {
         m_currentState.autoFocusEnabled = autoFocus;
-        m_currentState.manualFocusValue = position;
+        if (!autoFocus) {
+            m_currentState.manualFocusValue = position;
+        }
+        if (isSettling()) {
+            m_cachedState.autoFocusEnabled = m_currentState.autoFocusEnabled;
+            m_cachedState.manualFocusValue = m_currentState.manualFocusValue;
+        }
         emit stateChanged(m_currentState);
     }
     return success;
@@ -1101,6 +1106,7 @@ void CameraController::applyCurrentStateToCamera(const CameraState &uiState)
     setFaceFocus(uiState.faceFocusEnabled);
     setZoom(uiState.zoom);
     setPanTilt(uiState.pan, uiState.tilt);
+    setFocusAbsolute(uiState.manualFocusValue, uiState.autoFocusEnabled);
 
     // Image controls
     setBrightness(uiState.brightness);

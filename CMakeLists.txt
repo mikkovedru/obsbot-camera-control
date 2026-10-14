@@ -104,3 +104,28 @@ set_target_properties(obsbot-cli PROPERTIES
     BUILD_RPATH "${SDK_LIB_DIR}"
     INSTALL_RPATH "/usr/lib"
 )
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(autofocus-tests
+        tests/AutofocusTest.cpp
+        src/gui/TrackingControlWidget.cpp
+        src/gui/CameraController.cpp
+        src/gui/V4l2Backend.cpp
+        src/gui/XYPad.cpp
+        src/common/Config.cpp
+    )
+    target_include_directories(autofocus-tests PRIVATE
+        ${SDK_INCLUDE_DIR}
+        ${CMAKE_SOURCE_DIR}/src/gui
+        ${CMAKE_SOURCE_DIR}/src/common
+    )
+    target_link_directories(autofocus-tests PRIVATE ${SDK_LIB_DIR})
+    target_link_libraries(autofocus-tests PRIVATE Qt6::Widgets dev)
+    set_target_properties(autofocus-tests PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+        BUILD_RPATH "${SDK_LIB_DIR}"
+    )
+    add_test(NAME autofocus COMMAND autofocus-tests)
+    set_tests_properties(autofocus PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()
