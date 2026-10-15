@@ -49,6 +49,7 @@ add_executable(obsbot-gui
     src/gui/XYPad.h
     src/common/Config.cpp
     src/common/Config.h
+    src/common/ShutterSpeed.h
     resources/resources.qrc
 )
 

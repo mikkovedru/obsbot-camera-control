@@ -63,7 +63,7 @@ public:
         int whiteBalance;    // 0=Auto, 1=Daylight, etc.
         int whiteBalanceKelvin; // Manual Kelvin value when white balance is manual
         bool exposureAuto;   // Auto exposure mode (real hardware feature)
-        int exposure;        // Manual shutter value (camera-reported range)
+        int exposure;        // Manual shutter speed index, same for SDK and V4L2 (see ShutterSpeed.h)
         int iso;             // Sensor gain/ISO value (camera-reported range)
 
         // Status

@@ -227,7 +227,7 @@ virtual_camera_max_fps=0
 - Pan/Tilt: `-1.0` to `1.0` (0 is center)
 - Focus: `-1` for autofocus (default), or `0` to `100` for manual focus. Saved manual-focus settings are preserved.
 - Brightness/Contrast/Saturation: `0` to `255`
-- Exposure/ISO: `exposure` (manual shutter, used only when `exposure_auto=disabled`) and `iso` (sensor gain) use the range reported by the camera. Out-of-range values are clamped. On the Meet 2 in SDK mode, `exposure` is `10` to `42` and `iso` is `1` to `64`.
+- Exposure/ISO: `exposure` is the manual shutter speed, used only when `exposure_auto=disabled`. It is an index from `9` (1/8000s) to `45` (1/2s), for example `33` = 1/30s, and means the same in SDK and V4L2 mode. `iso` is the sensor gain. Both are clamped to the camera's range; on the Meet 2 that is `10` to `42` (1/6400s to 1/4s) for `exposure` and `1` to `64` for `iso`.
 - Virtual camera frame rate: `virtual_camera_max_fps=0` matches the capture rate (default). Any positive value caps the output; the app offers `15`, `24` and `30`.
 
 ## Technical Details

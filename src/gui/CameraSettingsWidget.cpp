@@ -1,37 +1,10 @@
 #include "CameraSettingsWidget.h"
+#include "ShutterSpeed.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
 #include <algorithm>
-
-namespace {
-
-// Maps the SDK's shutter index (cameraSetExposureAbsolute's shutter_time parameter,
-// per DevShutterTimeType) to a human-readable shutter speed.
-QString shutterTimeLabel(int value)
-{
-    static const char *kLabels[] = {
-        "1/8000s", "1/6400s", "1/5000s", "1/4000s", "1/3200s", "1/2500s", "1/2000s",
-        "1/1600s", "1/1250s", "1/1000s", "1/800s", "1/640s", "1/500s", "1/400s",
-        "1/320s", "1/240s", "1/200s", "1/160s", "1/120s", "1/100s", "1/80s",
-        "1/60s", "1/50s", "1/40s", "1/30s", "1/25s", "1/20s", "1/15s", "1/12.5s",
-        "1/10s", "1/8s", "1/6.25s", "1/5s", "1/4s", "1/3s", "1/2.5s", "1/2s"
-    };
-    constexpr int kFirstIndex = 9;
-    constexpr int kCount = static_cast<int>(sizeof(kLabels) / sizeof(kLabels[0]));
-
-    if (value == 0) {
-        return QStringLiteral("Auto");
-    }
-    const int offset = value - kFirstIndex;
-    if (offset >= 0 && offset < kCount) {
-        return QString::fromLatin1(kLabels[offset]);
-    }
-    return QString::number(value);
-}
-
-} // namespace
 
 CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget *parent)
     : QWidget(parent)
@@ -176,11 +149,13 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     exposureLayout->addWidget(m_exposureAutoCheckBox);
     exposureLayout->addWidget(new QLabel("Exposure:", this));
     m_exposureSlider = new QSlider(Qt::Horizontal, this);
-    m_exposureSlider->setRange(1, 100);
+    m_exposureSlider->setRange(ShutterSpeed::kFirstIndex, ShutterSpeed::kLastIndex);
+    m_exposureSlider->setValue(ShutterSpeed::kDefaultIndex);
     m_exposureSlider->setToolTip("Adjust manual shutter value");
     connect(m_exposureSlider, &QSlider::valueChanged, this, &CameraSettingsWidget::onExposureChanged);
     exposureLayout->addWidget(m_exposureSlider, 1);
     m_exposureValueLabel = new QLabel("1/30s", this);
+    m_exposureValueLabel->setObjectName("exposureValueLabel");
     m_exposureValueLabel->setMinimumWidth(56);
     exposureLayout->addWidget(m_exposureValueLabel);
     imageLayout->addLayout(exposureLayout);
@@ -610,7 +585,7 @@ void CameraSettingsWidget::updateWhiteBalanceKelvinLabel(int value)
 void CameraSettingsWidget::updateExposureValueLabel(int value)
 {
     if (m_exposureValueLabel) {
-        m_exposureValueLabel->setText(shutterTimeLabel(value));
+        m_exposureValueLabel->setText(QString::fromStdString(ShutterSpeed::label(value)));
     }
 }
 

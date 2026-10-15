@@ -1,7 +1,13 @@
 #include "CameraController.h"
+#include "ShutterSpeed.h"
 #include <QThread>
 #include <QDebug>
 #include <algorithm>
+
+static_assert(ShutterSpeed::kFirstIndex == Device::DevShutterTime_1_8000 &&
+              ShutterSpeed::kDefaultIndex == Device::DevShutterTime_1_30 &&
+              ShutterSpeed::kLastIndex == Device::DevShutterTime_1_2,
+              "ShutterSpeed indices must match the SDK's DevShutterTimeType");
 
 static constexpr int kDefaultWhiteBalanceKelvin = 4800;
 // Measured on a Meet 2: ai_mode reflects a disable after 1.0-1.55s. Generous margin on top.
@@ -21,10 +27,10 @@ CameraController::CameraController(QObject *parent)
     m_currentState.whiteBalanceKelvin = 5000;
     m_cachedState.whiteBalanceKelvin = 5000;
     m_currentState.exposureAuto = true;
-    m_currentState.exposure = 33;
+    m_currentState.exposure = ShutterSpeed::kDefaultIndex;
     m_currentState.iso = 1;
     m_cachedState.exposureAuto = true;
-    m_cachedState.exposure = 33;
+    m_cachedState.exposure = ShutterSpeed::kDefaultIndex;
     m_cachedState.iso = 1;
     m_lastRequestedWhiteBalance = static_cast<int>(Device::DevWhiteBalanceAuto);
     m_whiteBalanceFallbackActive = false;
@@ -205,11 +211,30 @@ void CameraController::refreshV4l2ControlRanges()
         return {r.min, r.max, r.step, r.defaultValue, r.valid};
     };
 
+    // V4L2 counts exposure in 100 µs units; offer the shutter speeds that fit in its range
+    auto shutterRange = [](V4l2Backend::ControlRange r) -> ParamRange {
+        ParamRange range;
+        if (!r.valid)
+            return range;
+        for (int index = ShutterSpeed::kFirstIndex; index <= ShutterSpeed::kLastIndex; ++index) {
+            const int exposure = ShutterSpeed::toV4l2Exposure(index);
+            if (exposure < r.min || exposure > r.max)
+                continue;
+            if (!range.valid)
+                range.min = index;
+            range.max = index;
+            range.valid = true;
+        }
+        if (range.valid)
+            range.defaultValue = std::clamp(ShutterSpeed::fromV4l2Exposure(r.defaultValue), range.min, range.max);
+        return range;
+    };
+
     m_brightnessRange = convert(m_v4l2.getBrightnessRange());
     m_contrastRange = convert(m_v4l2.getContrastRange());
     m_saturationRange = convert(m_v4l2.getSaturationRange());
     m_whiteBalanceKelvinRange = convert(m_v4l2.getWhiteBalanceTemperatureRange());
-    m_exposureRange = convert(m_v4l2.getExposureAbsoluteRange());
+    m_exposureRange = shutterRange(m_v4l2.getExposureAbsoluteRange());
     m_isoRange = convert(m_v4l2.getGainRange());
 
     m_supportedWhiteBalanceTypes.clear();
@@ -248,7 +273,11 @@ void CameraController::updateV4l2State()
     m_currentState.manualFocusValue = m_v4l2.getFocusAbsolute();
 
     m_currentState.exposureAuto = m_v4l2.getAutoExposure();
-    m_currentState.exposure = clampToRange(m_v4l2.getExposureAbsolute(), m_exposureRange, 1, 100);
+    const int exposure = m_v4l2.getExposureAbsolute();
+    if (exposure > 0) {
+        m_currentState.exposure = clampToRange(ShutterSpeed::fromV4l2Exposure(exposure, m_currentState.exposure),
+                                               m_exposureRange, ShutterSpeed::kFirstIndex, ShutterSpeed::kLastIndex);
+    }
     m_currentState.iso = clampToRange(m_v4l2.getGain(), m_isoRange, 1, 64);
 
     emit stateChanged(m_currentState);
@@ -774,13 +803,14 @@ bool CameraController::setExposureAuto(bool enabled)
 {
     if (!m_connected) return false;
 
-    int clamped = clampToRange(m_currentState.exposure, m_exposureRange, 1, 100);
+    int clamped = clampToRange(m_currentState.exposure, m_exposureRange,
+                               ShutterSpeed::kFirstIndex, ShutterSpeed::kLastIndex);
     bool success;
     if (m_v4l2Only) {
         success = m_v4l2.setAutoExposure(enabled);
         if (success && !enabled) {
             // Re-assert the last known shutter value when leaving auto mode
-            success = m_v4l2.setExposureAbsolute(clamped);
+            success = m_v4l2.setExposureAbsolute(ShutterSpeed::toV4l2Exposure(clamped));
         }
     } else {
         success = executeCommand("Set Exposure Mode", [this, clamped, enabled]() {
@@ -799,10 +829,10 @@ bool CameraController::setExposure(int value)
     if (!m_connected) return false;
     if (m_currentState.exposureAuto) return true; // Manual value is ignored while auto exposure is active
 
-    int clamped = clampToRange(value, m_exposureRange, 1, 100);
+    int clamped = clampToRange(value, m_exposureRange, ShutterSpeed::kFirstIndex, ShutterSpeed::kLastIndex);
     bool success;
     if (m_v4l2Only) {
-        success = m_v4l2.setExposureAbsolute(clamped);
+        success = m_v4l2.setExposureAbsolute(ShutterSpeed::toV4l2Exposure(clamped));
     } else {
         success = executeCommand("Set Exposure", [this, clamped]() {
             return m_device->cameraSetExposureAbsolute(clamped, false);
@@ -917,7 +947,8 @@ void CameraController::updateState()
     bool autoExposure;
     if (m_device->cameraGetExposureAbsolute(shutterValue, autoExposure) == 0) {
         m_currentState.exposureAuto = autoExposure;
-        m_currentState.exposure = clampToRange(shutterValue, m_exposureRange, 1, 100);
+        m_currentState.exposure = clampToRange(shutterValue, m_exposureRange,
+                                               ShutterSpeed::kFirstIndex, ShutterSpeed::kLastIndex);
     }
     int32_t isoValue;
     if (m_device->cameraGetMAEIsoR(isoValue) == 0) {

@@ -1,4 +1,5 @@
 #include "Config.h"
+#include "ShutterSpeed.h"
 #include <fstream>
 #include <sstream>
 #include <iostream>
@@ -46,7 +47,7 @@ void Config::setDefaults()
     m_settings.whiteBalanceKelvin = 5000;
     m_settings.focus = -1;            // Auto focus
     m_settings.exposureAuto = true;
-    m_settings.exposure = 33;         // Mid-range shutter value fallback
+    m_settings.exposure = ShutterSpeed::kDefaultIndex; // 1/30s
     m_settings.iso = 1;               // Lowest gain (best quality) fallback
 
     // Audio defaults
@@ -559,13 +560,13 @@ bool Config::parseLine(const std::string &line, int lineNumber, std::vector<Vali
     } else if (key == "exposure") {
         try {
             const int exposure = std::stoi(value);
-            if (exposure < 0) {
-                addError(InvalidValue, "exposure must be zero or greater");
+            if (!ShutterSpeed::isValidIndex(exposure)) {
+                addError(InvalidValue, "exposure must be a shutter speed index between 9 (1/8000s) and 45 (1/2s)");
                 return false;
             }
             m_settings.exposure = exposure;
         } catch (...) {
-            addError(InvalidValue, "exposure must be an integer");
+            addError(InvalidValue, "exposure must be an integer between 9 (1/8000s) and 45 (1/2s)");
             return false;
         }
     } else if (key == "iso") {
@@ -864,7 +865,8 @@ bool Config::save()
 
     file << "# Exposure (shutter) control\n";
     file << "exposure_auto=" << (m_settings.exposureAuto ? "enabled" : "disabled") << "\n";
-    file << "# Manual shutter value, only used when exposure_auto=disabled (range reported by camera)\n";
+    file << "# Manual shutter speed, only used when exposure_auto=disabled. Same scale for SDK and V4L2:\n";
+    file << "# 9 = 1/8000s ... 33 = 1/30s ... 45 = 1/2s (clamped to the camera's range)\n";
     file << "exposure=" << m_settings.exposure << "\n";
     file << "# Sensor gain / ISO value (range reported by camera)\n";
     file << "iso=" << m_settings.iso << "\n\n";

@@ -64,7 +64,7 @@ public:
         int whiteBalanceKelvin; // Manual Kelvin value (when whiteBalance==255)
         int focus;            // Manual focus position (0-100, -1 = auto)
         bool exposureAuto;    // Auto exposure mode
-        int exposure;         // Manual shutter value (camera-reported range, e.g. 10-42)
+        int exposure;         // Manual shutter speed index, 9 (1/8000s) to 45 (1/2s); see ShutterSpeed.h
         int iso;              // Sensor gain/ISO value (camera-reported range, e.g. 1-64)
 
         // Audio
