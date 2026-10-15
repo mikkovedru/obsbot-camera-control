@@ -129,4 +129,25 @@ if(BUILD_TESTING)
     )
     add_test(NAME autofocus COMMAND autofocus-tests)
     set_tests_properties(autofocus PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    add_executable(exposure-tests
+        tests/ExposureTest.cpp
+        src/gui/CameraSettingsWidget.cpp
+        src/gui/CameraController.cpp
+        src/gui/V4l2Backend.cpp
+        src/common/Config.cpp
+    )
+    target_include_directories(exposure-tests PRIVATE
+        ${SDK_INCLUDE_DIR}
+        ${CMAKE_SOURCE_DIR}/src/gui
+        ${CMAKE_SOURCE_DIR}/src/common
+    )
+    target_link_directories(exposure-tests PRIVATE ${SDK_LIB_DIR})
+    target_link_libraries(exposure-tests PRIVATE Qt6::Widgets dev)
+    set_target_properties(exposure-tests PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+        BUILD_RPATH "${SDK_LIB_DIR}"
+    )
+    add_test(NAME exposure COMMAND exposure-tests)
+    set_tests_properties(exposure PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()

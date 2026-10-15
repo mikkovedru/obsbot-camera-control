@@ -18,8 +18,8 @@ For a clean rebuild:
 
 ```bash
 cmake -S . -B build -DBUILD_TESTING=ON
-cmake --build build --target autofocus-tests
-ctest --test-dir build -R '^autofocus$' --output-on-failure
+cmake --build build --target autofocus-tests exposure-tests
+ctest --test-dir build --output-on-failure
 ```
 
 These tests use an offscreen Qt platform and a temporary configuration directory;
