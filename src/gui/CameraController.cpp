@@ -278,7 +278,9 @@ void CameraController::updateV4l2State()
         m_currentState.exposure = clampToRange(ShutterSpeed::fromV4l2Exposure(exposure, m_currentState.exposure),
                                                m_exposureRange, ShutterSpeed::kFirstIndex, ShutterSpeed::kLastIndex);
     }
-    m_currentState.iso = clampToRange(m_v4l2.getGain(), m_isoRange, 1, 64);
+    if (m_isoRange.valid) {
+        m_currentState.iso = clampToRange(m_v4l2.getGain(), m_isoRange, 1, 64);
+    }
 
     emit stateChanged(m_currentState);
 }
@@ -847,7 +849,8 @@ bool CameraController::setExposure(int value)
 
 bool CameraController::setISO(int value)
 {
-    if (!m_connected) return false;
+    // The SDK documents its ISO commands for the Tail Air only, so skip cameras that report no ISO range
+    if (!m_connected || !m_isoRange.valid) return false;
 
     int clamped = clampToRange(value, m_isoRange, 1, 64);
     bool success;
@@ -951,7 +954,7 @@ void CameraController::updateState()
                                                ShutterSpeed::kFirstIndex, ShutterSpeed::kLastIndex);
     }
     int32_t isoValue;
-    if (m_device->cameraGetMAEIsoR(isoValue) == 0) {
+    if (m_isoRange.valid && m_device->cameraGetMAEIsoR(isoValue) == 0) {
         m_currentState.iso = clampToRange(isoValue, m_isoRange, 1, 64);
     }
 

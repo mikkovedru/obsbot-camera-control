@@ -162,8 +162,10 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
 
     // ISO / Gain
     QHBoxLayout *isoLayout = new QHBoxLayout();
-    isoLayout->addWidget(new QLabel("ISO:", this));
+    m_isoLabel = new QLabel("ISO:", this);
+    isoLayout->addWidget(m_isoLabel);
     m_isoSlider = new QSlider(Qt::Horizontal, this);
+    m_isoSlider->setObjectName("isoSlider");
     m_isoSlider->setRange(1, 64);
     m_isoSlider->setToolTip("Adjust sensor gain / ISO (lower = less noise, higher = brighter in low light). "
                             "ISO value shown is approximated from OBSBOT's published 100-6400 range.");
@@ -549,9 +551,15 @@ void CameraSettingsWidget::applyControlRanges()
     applyRange(m_controller->getExposureRange(), m_exposureSlider, m_exposureRangeApplied,
                QStringLiteral("Adjust manual shutter value (%1-%2)"));
     updateExposureValueLabel(m_exposureSlider->value());
-    applyRange(m_controller->getISORange(), m_isoSlider, m_isoRangeApplied,
+    const auto isoRange = m_controller->getISORange();
+    applyRange(isoRange, m_isoSlider, m_isoRangeApplied,
                QStringLiteral("Adjust sensor gain / ISO (%1-%2)"));
     updateISOValueLabel(m_isoSlider->value());
+    // The controller skips ISO on cameras that report no ISO range, so don't offer it there
+    const bool showIso = !m_controller->isConnected() || isoRange.valid;
+    m_isoLabel->setVisible(showIso);
+    m_isoSlider->setVisible(showIso);
+    m_isoValueLabel->setVisible(showIso);
 
     const auto wbRange = m_controller->getWhiteBalanceKelvinRange();
     if (wbRange.valid) {

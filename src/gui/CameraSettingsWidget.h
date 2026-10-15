@@ -173,6 +173,7 @@ private:
     QCheckBox *m_exposureAutoCheckBox;
     QSlider *m_exposureSlider;
     QLabel *m_exposureValueLabel;
+    QLabel *m_isoLabel;
     QSlider *m_isoSlider;
     QLabel *m_isoValueLabel;
 

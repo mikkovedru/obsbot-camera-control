@@ -26,7 +26,7 @@ A native Qt6 application for controlling OBSBOT cameras on Linux. Provides full 
 - **Pan/Tilt/Zoom (PTZ)** - Precise camera positioning with center reset
 - **Auto-Framing** - AI-powered face tracking with single/upper body modes
 - **Image Settings** - Brightness, contrast, saturation with auto/manual modes
-- **Exposure & ISO** - Auto or manual shutter speed (shown as e.g. 1/30s) and ISO (sensor gain). ISO control has only been verified on the Meet 2.
+- **Exposure & ISO** - Auto or manual shutter speed (shown as e.g. 1/30s) and ISO (sensor gain). ISO is only shown when the camera reports an ISO range, and has only been verified on the Meet 2.
 - **Field of View** - Wide (86°), Medium (78°), Narrow (65°)
 - **HDR** - High Dynamic Range for better exposure
 - **Face AE/Focus** - Face-based auto exposure and auto focus
