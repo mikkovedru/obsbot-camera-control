@@ -97,6 +97,7 @@ private:
     QList<DetectedCamera> m_detectedCameras;
     void populateCameraSelector();
     bool m_isCameraSwitch {false};
+    bool m_applyUiStatePending {false};  // A newly connected camera has yet to receive the UI state
 
     // UI
     QPushButton *m_previewToggleButton;

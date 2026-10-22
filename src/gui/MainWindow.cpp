@@ -1114,6 +1114,10 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
     m_trackingWidget->setV4l2Mode(v4l2Mode);
     m_settingsWidget->setV4l2Mode(v4l2Mode);
 
+    // The camera is polled before the delayed apply below runs (by updateStatus() here and by the
+    // controller after this signal). Don't let those polls replace the UI state, i.e. the loaded
+    // settings or the user's changes, with the camera's current state before it is applied.
+    m_applyUiStatePending = !m_isCameraSwitch;
     QTimer::singleShot(100, this, [this]() {
         if (m_isCameraSwitch) {
             // Pull the new camera's actual state into the UI
@@ -1122,7 +1126,9 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
             onStateChanged(state);
             m_isCameraSwitch = false;
         } else {
-            m_controller->applyCurrentStateToCamera(getUIState());
+            const auto uiState = getUIState();
+            m_applyUiStatePending = false;
+            m_controller->applyCurrentStateToCamera(uiState);
         }
     });
 
@@ -1161,6 +1167,10 @@ void MainWindow::onCameraDisconnected()
 
 void MainWindow::onStateChanged(const CameraController::CameraState &state)
 {
+    if (m_applyUiStatePending) {
+        return;  // See onCameraConnected()
+    }
+
     // Update all widgets with new state
     m_trackingWidget->updateFromState(state);
     m_settingsWidget->updateFromState(state);
