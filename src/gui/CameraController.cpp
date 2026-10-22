@@ -9,7 +9,6 @@ static_assert(ShutterSpeed::kFirstIndex == Device::DevShutterTime_1_8000 &&
               ShutterSpeed::kLastIndex == Device::DevShutterTime_1_2,
               "ShutterSpeed indices must match the SDK's DevShutterTimeType");
 
-static constexpr int kDefaultWhiteBalanceKelvin = 4800;
 static constexpr int kSdkDetectGraceMs = 8000;
 // Measured on a Meet 2: ai_mode reflects a disable after 1.0-1.55s. Generous margin on top.
 static constexpr int kAiModeSwitchTimeoutMs = 4000;
@@ -23,6 +22,9 @@ CameraController::CameraController(QObject *parent)
 {
     m_currentState = {};
     m_cachedState = {};
+    // The SDK's first status can still have zoom_ratio=0 while discovery settles.
+    m_currentState.zoom = 1.0;
+    m_cachedState.zoom = 1.0;
     m_currentState.autoFocusEnabled = true;
     m_cachedState.autoFocusEnabled = true;
     m_currentState.whiteBalanceKelvin = 5000;
@@ -234,9 +236,6 @@ void CameraController::connectV4l2(const std::string &devicePath)
     m_cameraInfo.connected = true;
 
     refreshV4l2ControlRanges();
-
-    m_v4l2.setWhiteBalanceAuto(false);
-    m_v4l2.setWhiteBalanceTemperature(kDefaultWhiteBalanceKelvin);
 
     emit cameraConnected(m_cameraInfo);
     updateV4l2State();
@@ -1113,11 +1112,9 @@ void CameraController::applyCurrentStateToCamera(const CameraState &uiState)
     m_currentState.exposure = uiState.exposure;
     m_currentState.iso = uiState.iso;
 
-    // Cache the intended state
-    m_cachedState = uiState;
-
     // Begin settling period - block status updates for 2 seconds
     beginSettling(2000);
+    m_cachedState = uiState;
 
     // Apply the current UI state to camera (respects user changes)
     if (isTiny2Family()) {

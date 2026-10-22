@@ -99,6 +99,7 @@ private:
     bool m_isCameraSwitch {false};
     bool m_applyUiStatePending {false};  // A newly connected camera has yet to receive the UI state
     unsigned int m_connectionGeneration {0};
+    bool m_restoreSavedPosition {true};
 
     // UI
     QPushButton *m_previewToggleButton;

@@ -19,6 +19,7 @@ int main(int argc, char **argv)
     qputenv("XDG_CONFIG_HOME", configDir.path().toUtf8());
 
     CameraController controller;
+    require(controller.getCurrentState().zoom == 1.0, "Zoom must be valid before the first SDK status arrives");
     require(controller.getCurrentState().autoFocusEnabled, "Controller must default to autofocus");
     require(controller.getConfig().getSettings().focus == -1, "Config must default to autofocus");
 

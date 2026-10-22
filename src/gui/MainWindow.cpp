@@ -1128,10 +1128,17 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
             onStateChanged(state);
             m_isCameraSwitch = false;
         } else {
-            const auto uiState = getUIState();
+            auto uiState = getUIState();
+            if (m_restoreSavedPosition) {
+                const auto &settings = m_controller->getConfig().getSettings();
+                uiState.pan = settings.pan;
+                uiState.tilt = settings.tilt;
+                uiState.zoom = settings.zoom;
+            }
             m_applyUiStatePending = false;
             m_controller->applyCurrentStateToCamera(uiState);
         }
+        m_restoreSavedPosition = false;
     });
 
     updateStatus();
