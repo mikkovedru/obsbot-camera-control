@@ -70,6 +70,18 @@ int main(int argc, char **argv)
             require(widget.manualFocusValue() == 37, "Camera focus position must synchronize");
         }
     }
+    auto *pad = widget.findChild<XYPad *>();
+    QSlider *zoom = nullptr;
+    for (auto *slider : widget.findChildren<QSlider *>())
+        if (slider->minimum() == 100 && slider->maximum() == 200) zoom = slider;
+    require(pad && zoom, "PTZ controls must exist");
+    for (bool tracking : {true, false}) {
+        state.autoFramingEnabled = tracking;
+        state.zoom = 1.37;
+        widget.updateFromState(state);
+        require(pad->isEnabled() == !tracking, "Only manual pan/tilt must be locked during tracking");
+        require(zoom->isEnabled() && zoom->value() == 137, "Zoom must stay adjustable and correctly scaled during tracking");
+    }
     require(stateChanges == 0 && commandFailures == 0, "Camera state synchronization must not send commands");
 
     widget.setV4l2Mode(true);
