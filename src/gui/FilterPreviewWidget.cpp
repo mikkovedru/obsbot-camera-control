@@ -183,10 +183,18 @@ FilterPreviewWidget::FilterPreviewWidget(QWidget *parent)
 
 FilterPreviewWidget::~FilterPreviewWidget()
 {
+    // QOpenGLWidget destroys the context in its base destructor, after our members.
+    // Its signal must not call back into this partially destroyed derived object.
+    if (context()) {
+        disconnect(context(), &QOpenGLContext::aboutToBeDestroyed,
+                   this, &FilterPreviewWidget::handleContextAboutToBeDestroyed);
+    }
     if (isValid()) {
         makeCurrent();
-        cleanupGLResources();
-        doneCurrent();
+        if (QOpenGLContext::currentContext() == context()) {
+            cleanupGLResources();
+            doneCurrent();
+        }
     }
 }
 
@@ -474,6 +482,9 @@ void FilterPreviewWidget::handleContextAboutToBeDestroyed()
     }
 
     makeCurrent();
+    if (QOpenGLContext::currentContext() != context()) {
+        return;
+    }
     cleanupGLResources();
     doneCurrent();
 }
