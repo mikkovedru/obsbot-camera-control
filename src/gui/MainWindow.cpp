@@ -463,11 +463,11 @@ void MainWindow::setupUI()
     scrollLayout->addWidget(m_tabWidget);
     m_effectsWidget->reset();
 
-    // Resize tab widget to fit the current tab (QTabWidget normally sizes to the tallest)
+    // Let the current page determine the tab's size, including newly shown controls.
     connect(m_tabWidget, &QTabWidget::currentChanged, this, [this](int) {
         fitTabToCurrentPage();
     });
-    QTimer::singleShot(0, this, &MainWindow::fitTabToCurrentPage);
+    fitTabToCurrentPage();
 
     QGroupBox *virtualCameraGroup = new QGroupBox(tr("Virtual Camera"), scrollContent);
     QVBoxLayout *virtualLayout = new QVBoxLayout(virtualCameraGroup);
@@ -1185,17 +1185,16 @@ void MainWindow::onStateChanged(const CameraController::CameraState &state)
     // Update all widgets with new state
     m_trackingWidget->updateFromState(state);
     m_settingsWidget->updateFromState(state);
-
-    // Refit tab height — widget visibility may have changed (e.g. Tiny2 advanced controls)
-    fitTabToCurrentPage();
 }
 
 void MainWindow::fitTabToCurrentPage()
 {
-    QWidget *page = m_tabWidget->currentWidget();
-    if (!page) return;
-    m_tabWidget->setMaximumHeight(
-        page->sizeHint().height() + m_tabWidget->tabBar()->sizeHint().height());
+    const int current = m_tabWidget->currentIndex();
+    for (int i = 0; i < m_tabWidget->count(); ++i) {
+        const auto policy = i == current ? QSizePolicy::Preferred : QSizePolicy::Ignored;
+        m_tabWidget->widget(i)->setSizePolicy(policy, policy);
+    }
+    m_tabWidget->updateGeometry();
 }
 
 void MainWindow::onCommandFailed(const QString &description, int errorCode)
