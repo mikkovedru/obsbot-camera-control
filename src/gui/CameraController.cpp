@@ -10,6 +10,7 @@ static_assert(ShutterSpeed::kFirstIndex == Device::DevShutterTime_1_8000 &&
               "ShutterSpeed indices must match the SDK's DevShutterTimeType");
 
 static constexpr int kDefaultWhiteBalanceKelvin = 4800;
+static constexpr int kSdkDetectGraceMs = 8000;
 // Measured on a Meet 2: ai_mode reflects a disable after 1.0-1.55s. Generous margin on top.
 static constexpr int kAiModeSwitchTimeoutMs = 4000;
 // Sentinel for expectAiMode(): accept any mode other than AiWorkModeNone.
@@ -133,7 +134,16 @@ void CameraController::connectToCamera(const QString &devicePath)
             updateState();
         }
     } else if (!m_connected) {
-        tryV4l2Fallback();
+        // The SDK enumerates on a background thread; let it finish before fallback.
+        if (!m_sdkDetectTimer) {
+            m_sdkDetectTimer = new QTimer(this);
+            m_sdkDetectTimer->setSingleShot(true);
+            connect(m_sdkDetectTimer, &QTimer::timeout, this, [this]() {
+                if (!m_connected)
+                    tryV4l2Fallback();
+            });
+        }
+        m_sdkDetectTimer->start(kSdkDetectGraceMs);
     }
 }
 
@@ -290,6 +300,8 @@ void CameraController::updateV4l2State()
 
 void CameraController::disconnectFromCamera()
 {
+    if (m_sdkDetectTimer)
+        m_sdkDetectTimer->stop();
     if (m_connected) {
         if (m_v4l2Only) {
             m_v4l2.close();
