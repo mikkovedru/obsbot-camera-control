@@ -108,6 +108,15 @@ set_target_properties(obsbot-cli PROPERTIES
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(virtual-output-tests
+        tests/VirtualCameraStreamerTest.cpp
+        src/gui/VirtualCameraStreamer.cpp
+    )
+    target_include_directories(virtual-output-tests PRIVATE ${CMAKE_SOURCE_DIR}/src/gui)
+    target_link_libraries(virtual-output-tests PRIVATE Qt6::Widgets)
+    set_target_properties(virtual-output-tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+    add_test(NAME virtual-output COMMAND virtual-output-tests)
+
     add_executable(preview-output-tests
         tests/PreviewOutputTest.cpp
         src/gui/FilterPreviewWidget.cpp

@@ -33,6 +33,8 @@ public:
     void setEnabled(bool enabled);
     void setForcedResolution(const QSize &resolution);
     QSize forcedResolution() const { return m_forcedResolution; }
+    static QSize normalizedOutputSize(const QSize &resolution);
+    static QImage prepareFrameForOutput(const QImage &frame, const QSize &forcedResolution = QSize());
 
     // Caps how many frames per second are forwarded to the virtual camera
     // device, independent of the capture/preview frame rate. 0 = unlimited.
