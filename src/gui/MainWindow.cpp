@@ -1096,6 +1096,7 @@ void MainWindow::onPreviewWindowClosed()
 
 void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
 {
+    const auto generation = ++m_connectionGeneration;
     QString deviceText;
     if (info.version.isEmpty()) {
         deviceText = QString("✓ Connected:\n%1").arg(info.name);
@@ -1118,7 +1119,8 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
     // controller after this signal). Don't let those polls replace the UI state, i.e. the loaded
     // settings or the user's changes, with the camera's current state before it is applied.
     m_applyUiStatePending = !m_isCameraSwitch;
-    QTimer::singleShot(100, this, [this]() {
+    QTimer::singleShot(100, this, [this, generation]() {
+        if (generation != m_connectionGeneration || !m_controller->isConnected()) return;
         if (m_isCameraSwitch) {
             // Pull the new camera's actual state into the UI
             // without pushing the old camera's state back
@@ -1147,6 +1149,8 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
 
 void MainWindow::onCameraDisconnected()
 {
+    ++m_connectionGeneration;
+    m_applyUiStatePending = false;
     m_isCameraSwitch = false;
     m_deviceInfoLabel->setText("❌ Camera Disconnected");
     updateStatusBanner(false);
@@ -1710,9 +1714,11 @@ void MainWindow::onCameraSelectorChanged(int index)
     static constexpr int kCameraSwitchDelayMs = 300;
 
     const QString devicePath = cam.devicePath;
-    m_isCameraSwitch = true;
     m_controller->disconnectFromCamera();
-    QTimer::singleShot(kCameraSwitchDelayMs, this, [this, devicePath]() {
+    m_isCameraSwitch = true;
+    const auto generation = ++m_connectionGeneration;
+    QTimer::singleShot(kCameraSwitchDelayMs, this, [this, devicePath, generation]() {
+        if (generation != m_connectionGeneration) return;
         m_controller->connectToCamera(devicePath);
     });
 }

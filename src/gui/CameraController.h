@@ -6,6 +6,7 @@
 #include <QDeadlineTimer>
 #include <QMap>
 #include <memory>
+#include <mutex>
 #include <functional>
 #include <vector>
 #include <dev/devs.hpp>
@@ -160,6 +161,11 @@ signals:
     void configLoaded();  // Emitted after config is successfully loaded
 
 private:
+    struct SdkCallbackGuard {
+        std::mutex mutex;
+        CameraController *controller = nullptr;
+    };
+    std::shared_ptr<SdkCallbackGuard> m_sdkCallbackGuard;
     std::shared_ptr<Device> m_device;
     bool m_connected;
     QString m_selectedDevicePath;
@@ -168,7 +174,7 @@ private:
     QTimer *m_v4l2ScanTimer = nullptr;
     QTimer *m_sdkDetectTimer = nullptr;  // Grace period before V4L2 fallback
     QString m_v4l2DevicePath;
-    CameraInfo m_cameraInfo;
+    CameraInfo m_cameraInfo{};
     CameraState m_currentState;
     CameraState m_cachedState;  // Cache intended state during settling
     Config m_config;
