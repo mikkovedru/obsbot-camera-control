@@ -273,7 +273,8 @@ void CameraController::updateV4l2State()
     m_currentState.manualFocusValue = m_v4l2.getFocusAbsolute();
 
     m_currentState.exposureAuto = m_v4l2.getAutoExposure();
-    const int exposure = m_v4l2.getExposureAbsolute();
+    // Like the SDK path: in auto mode the exposure is the camera's own choice, not the manual speed
+    const int exposure = m_currentState.exposureAuto ? 0 : m_v4l2.getExposureAbsolute();
     if (exposure > 0) {
         m_currentState.exposure = clampToRange(ShutterSpeed::fromV4l2Exposure(exposure, m_currentState.exposure),
                                                m_exposureRange, ShutterSpeed::kFirstIndex, ShutterSpeed::kLastIndex);
@@ -945,13 +946,16 @@ void CameraController::updateState()
         }
     }
 
-    // Exposure/ISO have genuine hardware auto/manual state, so read it directly (no preservation needed)
+    // Exposure/ISO have genuine hardware auto/manual state, so read it directly
     int32_t shutterValue;
     bool autoExposure;
     if (m_device->cameraGetExposureAbsolute(shutterValue, autoExposure) == 0) {
         m_currentState.exposureAuto = autoExposure;
-        m_currentState.exposure = clampToRange(shutterValue, m_exposureRange,
-                                               ShutterSpeed::kFirstIndex, ShutterSpeed::kLastIndex);
+        // The SDK ignores the shutter value in auto mode; keep the manual speed to restore when Auto is turned off
+        if (!autoExposure) {
+            m_currentState.exposure = clampToRange(shutterValue, m_exposureRange,
+                                                   ShutterSpeed::kFirstIndex, ShutterSpeed::kLastIndex);
+        }
     }
     int32_t isoValue;
     if (m_isoRange.valid && m_device->cameraGetMAEIsoR(isoValue) == 0) {
