@@ -27,9 +27,12 @@ they do not connect to or change camera hardware.
 
 ## Dependencies
 
-**Build**: cmake, make, gcc/g++, qt6-base, qt6-multimedia, pkg-config
+**Build**: cmake, make, gcc/g++, qt6-base, qt6-multimedia, Qt6 OpenGLWidgets, pkg-config
 
 On Arch: `pacman -S cmake qt6-base qt6-multimedia`
+
+On Debian/Ubuntu:
+`apt install build-essential cmake qt6-base-dev qt6-multimedia-dev libqt6opengl6-dev pkg-config`
 
 ## Making Changes
 
