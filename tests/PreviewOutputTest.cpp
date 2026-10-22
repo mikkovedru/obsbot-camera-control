@@ -75,8 +75,13 @@ int main(int argc, char **argv)
                     std::abs(pixel.blue() - expected.blue()) < 5,
                     "All four quadrants must survive high-DPI export without cropping");
         }
+        widget->hide();
+        waitForEvents(30);
+        const int before = emitted;
+        widget->updateVideoFrame(frame);
+        require(emitted == before + 1, "Hidden preview must keep producing virtual-camera frames without paint events");
         delete widget;
         waitForEvents(10);
     }
-    qInfo("High-DPI export and repeated GL teardown passed");
+    qInfo("High-DPI export, hidden-window output, and repeated GL teardown passed");
 }

@@ -1526,6 +1526,7 @@ void MainWindow::changeEvent(QEvent *event)
         QWindowStateChangeEvent *stateEvent = static_cast<QWindowStateChangeEvent*>(event);
 
         if (windowState() & Qt::WindowMinimized) {
+            if (m_virtualCameraStreamer->isEnabled()) return;
             // Window is being minimized
 
             // Save preview state
@@ -1542,8 +1543,7 @@ void MainWindow::changeEvent(QEvent *event)
         } else if (stateEvent->oldState() & Qt::WindowMinimized) {
             // Window is being restored from minimized state
 
-            // ALWAYS reconnect to camera (regardless of preview state)
-            m_controller->connectToCamera();
+            if (!m_controller->isConnected()) m_controller->connectToCamera();
 
             // ONLY restore preview if it was enabled before minimize
             if (m_previewStateBeforeMinimize) {
@@ -1825,6 +1825,10 @@ void MainWindow::onTrayIconActivated(QSystemTrayIcon::ActivationReason reason)
 void MainWindow::onShowHideAction()
 {
     if (isVisible()) {
+        if (m_virtualCameraStreamer->isEnabled()) {
+            hide();
+            return;
+        }
         // Save preview state
         m_previewStateBeforeMinimize = m_previewWidget->isPreviewEnabled();
 
@@ -1838,8 +1842,7 @@ void MainWindow::onShowHideAction()
 
         hide();
     } else {
-        // ALWAYS reconnect to camera when restoring from tray
-        m_controller->connectToCamera();
+        if (!m_controller->isConnected()) m_controller->connectToCamera();
 
         // ONLY restore preview if it was enabled before hiding
         if (m_previewStateBeforeMinimize) {
