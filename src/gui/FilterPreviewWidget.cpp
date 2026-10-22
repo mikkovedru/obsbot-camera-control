@@ -280,7 +280,7 @@ void FilterPreviewWidget::paintGL()
 
     if (m_emitPending && m_framebuffer) {
         m_framebuffer->bind();
-        renderToCurrentTarget(frameSize);
+        renderToCurrentTarget(frameSize, false);
 
         QImage output(frameSize, QImage::Format_RGBA8888);
         glPixelStorei(GL_PACK_ALIGNMENT, 1);
@@ -292,7 +292,8 @@ void FilterPreviewWidget::paintGL()
         m_emitPending = false;
     }
 
-    renderToCurrentTarget(size());
+    glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
+    renderToCurrentTarget(size(), true);
     m_program->release();
 }
 
@@ -411,13 +412,14 @@ void FilterPreviewWidget::uploadTextureIfNeeded()
     m_textureDirty = false;
 }
 
-void FilterPreviewWidget::renderToCurrentTarget(const QSize &targetSize)
+void FilterPreviewWidget::renderToCurrentTarget(const QSize &targetSize, bool useDevicePixelRatio)
 {
     if (!m_program || !m_texture) {
         return;
     }
 
-    const qreal dpr = devicePixelRatioF();
+    // The export FBO already uses image pixels; only the on-screen surface uses DPR.
+    const qreal dpr = useDevicePixelRatio ? devicePixelRatioF() : 1.0;
     const QSize physicalSize = (QSizeF(targetSize) * dpr).toSize();
 
     glViewport(0, 0, physicalSize.width(), physicalSize.height());

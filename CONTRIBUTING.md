@@ -31,8 +31,8 @@ The OpenGL test requires a display and runs only when explicitly enabled:
 OBSBOT_TEST_OPENGL=1 QT_SCALE_FACTOR=2 ./build/preview-output-tests
 ```
 
-It checks repeated GL initialization and cleanup. CTest reports it skipped without
-the opt-in.
+It uses synthetic video frames to check high-DPI export and repeated GL cleanup.
+CTest reports it skipped without the opt-in.
 
 ## Dependencies
 

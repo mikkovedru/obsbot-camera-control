@@ -41,14 +41,42 @@ int main(int argc, char **argv)
     }
     QApplication app(argc, argv);
     app.setQuitOnLastWindowClosed(false);
+    QImage input(160, 120, QImage::Format_RGBA8888);
+    const QColor colors[] = {Qt::red, Qt::green, Qt::blue, Qt::yellow};
+    for (int y = 0; y < input.height(); ++y)
+        for (int x = 0; x < input.width(); ++x)
+            input.setPixelColor(x, y, colors[(y >= 60) * 2 + (x >= 80)]);
+    QVideoFrame frame(QVideoFrameFormat(input.size(), QVideoFrameFormat::Format_RGBA8888));
+    require(frame.map(QVideoFrame::WriteOnly), "Cannot map synthetic video frame");
+    for (int y = 0; y < input.height(); ++y)
+        std::memcpy(frame.bits(0) + y * frame.bytesPerLine(0), input.constScanLine(y), input.width() * 4);
+    frame.unmap();
+
     for (int iteration = 0; iteration < 3; ++iteration) {
         auto *widget = new FilterPreviewWidget;
         widget->resize(320, 240);
         widget->show();
         require(waitUntil([widget]() { return widget->isValid(); }),
                 "OpenGL context must initialize on the selected display");
+        require(widget->devicePixelRatioF() > 1.5, "Run this test with QT_SCALE_FACTOR=2");
+        QImage output;
+        int emitted = 0;
+        QObject::connect(widget, &FilterPreviewWidget::processedFrameReady,
+                         [&](const QImage &image) { output = image; ++emitted; });
+        widget->updateVideoFrame(frame);
+        require(waitUntil([&output]() { return !output.isNull(); }),
+                "Preview must produce an exported frame before checking its dimensions");
+        require(output.size() == input.size(), "Export must retain the full input dimensions");
+        for (int quadrant = 0; quadrant < 4; ++quadrant) {
+            const QColor pixel = output.pixelColor(40 + (quadrant % 2) * 80, 30 + (quadrant / 2) * 60);
+            const auto &expected = colors[quadrant];
+            require(std::abs(pixel.red() - expected.red()) < 5 &&
+                    std::abs(pixel.green() - expected.green()) < 5 &&
+                    std::abs(pixel.blue() - expected.blue()) < 5,
+                    "All four quadrants must survive high-DPI export without cropping");
+        }
         delete widget;
         waitForEvents(10);
     }
-    qInfo("Repeated OpenGL initialization and teardown passed");
+    qInfo("High-DPI export and repeated GL teardown passed");
 }
