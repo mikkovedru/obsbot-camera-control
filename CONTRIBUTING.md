@@ -18,12 +18,21 @@ For a clean rebuild:
 
 ```bash
 cmake -S . -B build -DBUILD_TESTING=ON
-cmake --build build --target autofocus-tests exposure-tests
+cmake --build build --target autofocus-tests exposure-tests virtual-output-tests preview-output-tests
 ctest --test-dir build --output-on-failure
 ```
 
 These tests use an offscreen Qt platform and a temporary configuration directory;
 they do not connect to or change camera hardware.
+
+The OpenGL export test requires a display and runs only when explicitly enabled:
+
+```bash
+OBSBOT_TEST_OPENGL=1 QT_SCALE_FACTOR=2 ./build/preview-output-tests
+```
+
+It uses synthetic video frames to check high-DPI export, continued output while
+hidden, and repeated GL cleanup. CTest reports it skipped without the opt-in.
 
 ## Dependencies
 

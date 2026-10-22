@@ -367,17 +367,6 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
         }
     }
 
-    // Sync zoom slider from camera state (only when user isn't dragging)
-    if (!m_zoomSlider->isSliderDown() && !commandInFlight && !isSettling) {
-        int zoomSliderVal = static_cast<int>(state.zoom * 10.0 + 0.5);
-        if (m_zoomSlider->value() != zoomSliderVal) {
-            m_zoomSlider->blockSignals(true);
-            m_zoomSlider->setValue(zoomSliderVal);
-            m_zoomSlider->blockSignals(false);
-            m_zoomLabel->setText(QString("%1x").arg(zoomSliderVal / 10.0, 0, 'f', 1));
-        }
-    }
-
     // Sync focus mode and position without sending commands back to the camera.
     if (!m_focusSlider->isSliderDown() && !commandInFlight && !isSettling) {
         QSignalBlocker autoFocusBlocker(m_autoFocusCheckBox);

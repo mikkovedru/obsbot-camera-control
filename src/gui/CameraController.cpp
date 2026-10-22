@@ -9,7 +9,6 @@ static_assert(ShutterSpeed::kFirstIndex == Device::DevShutterTime_1_8000 &&
               ShutterSpeed::kLastIndex == Device::DevShutterTime_1_2,
               "ShutterSpeed indices must match the SDK's DevShutterTimeType");
 
-static constexpr int kDefaultWhiteBalanceKelvin = 4800;
 static constexpr int kSdkDetectGraceMs = 8000;
 // Measured on a Meet 2: ai_mode reflects a disable after 1.0-1.55s. Generous margin on top.
 static constexpr int kAiModeSwitchTimeoutMs = 4000;
@@ -23,6 +22,9 @@ CameraController::CameraController(QObject *parent)
 {
     m_currentState = {};
     m_cachedState = {};
+    // The SDK's first status can still have zoom_ratio=0 while discovery settles.
+    m_currentState.zoom = 1.0;
+    m_cachedState.zoom = 1.0;
     m_currentState.autoFocusEnabled = true;
     m_cachedState.autoFocusEnabled = true;
     m_currentState.whiteBalanceKelvin = 5000;
@@ -46,6 +48,8 @@ CameraController::CameraController(QObject *parent)
 
 CameraController::~CameraController()
 {
+    blockSignals(true);
+    disconnectFromCamera();
 }
 
 void CameraController::connectToCamera()
@@ -55,7 +59,11 @@ void CameraController::connectToCamera()
 
 void CameraController::connectToCamera(const QString &devicePath)
 {
+    disconnectFromCamera();
     m_selectedDevicePath = devicePath;
+    m_sdkCallbackGuard = std::make_shared<SdkCallbackGuard>();
+    m_sdkCallbackGuard->controller = this;
+    const auto guard = m_sdkCallbackGuard;
 
     auto pickDevice = [this](const std::list<std::shared_ptr<Device>> &list)
         -> std::shared_ptr<Device>
@@ -68,15 +76,20 @@ void CameraController::connectToCamera(const QString &devicePath)
                 return dev;
         }
         qDebug() << "CameraController: device" << m_selectedDevicePath
-                 << "not found in SDK list, using first available";
-        return list.front();
+                 << "not yet found in SDK list";
+        return nullptr;
     };
 
-    auto onDevChanged = [this, pickDevice](std::string /*dev_sn*/, bool connected, void * /*param*/) {
+    auto onDevChanged = [this, guard, pickDevice](std::string devSn, bool connected, void * /*param*/) {
+        std::lock_guard<std::mutex> lock(guard->mutex);
+        auto *controller = guard->controller;
+        if (!controller) return;
         // The SDK calls this from its discovery thread. Handle the change on the controller's
         // thread instead, so it is serialized with the V4L2 fallback, camera commands and UI reads.
-        QMetaObject::invokeMethod(this, [this, pickDevice, connected]() {
+        QMetaObject::invokeMethod(controller, [this, guard, pickDevice, connected, devSn]() {
+            if (m_sdkCallbackGuard != guard) return;
             if (connected) {
+                if (m_connected && !m_v4l2Only) return;
                 auto dev_list = Devices::get().getDevList();
                 auto dev = pickDevice(dev_list);
                 if (dev) {
@@ -87,9 +100,11 @@ void CameraController::connectToCamera(const QString &devicePath)
                     if (m_v4l2ScanTimer) {
                         m_v4l2ScanTimer->stop();
                     }
+                    if (m_sdkDetectTimer) m_sdkDetectTimer->stop();
+                    m_v4l2Only = false;
+                    m_v4l2DevicePath.clear();
                     m_device = dev;
                     m_connected = true;
-                    m_v4l2Only = false;
                     m_cameraInfo.name = QString::fromStdString(m_device->devName());
                     m_cameraInfo.serialNumber = QString::fromStdString(m_device->devSn());
                     m_cameraInfo.version = QString::fromStdString(m_device->devVersion());
@@ -100,11 +115,15 @@ void CameraController::connectToCamera(const QString &devicePath)
                     updateState();
                 }
             } else {
+                if (!m_device || m_device->devSn() != devSn) return;
                 if (m_v4l2Only) {
                     // SDK discovery keeps running alongside a V4L2-only connection; an SDK
                     // "device gone" event does not concern the V4L2 handle we actually use.
                     return;
                 }
+                m_device.reset();
+                ++m_autoFramingGeneration;
+                m_settlingTimer->stop();
                 m_connected = false;
                 m_cameraInfo.connected = false;
                 resetControlRanges();
@@ -120,6 +139,9 @@ void CameraController::connectToCamera(const QString &devicePath)
     if (!dev_list.empty() && !m_connected) {
         auto dev = pickDevice(dev_list);
         if (dev) {
+            m_v4l2.close();
+            m_v4l2DevicePath.clear();
+            if (m_sdkDetectTimer) m_sdkDetectTimer->stop();
             m_device = dev;
             m_connected = true;
             m_v4l2Only = false;                       // SDK reached: clear stale V4L2 fallback
@@ -133,7 +155,8 @@ void CameraController::connectToCamera(const QString &devicePath)
             emit cameraConnected(m_cameraInfo);
             updateState();
         }
-    } else if (!m_connected) {
+    }
+    if (!m_connected) {
         // The SDK enumerates on a background thread; let it finish before fallback.
         if (!m_sdkDetectTimer) {
             m_sdkDetectTimer = new QTimer(this);
@@ -154,7 +177,8 @@ void CameraController::tryV4l2Fallback()
         return;
     }
 
-    auto path = V4l2Backend::findObsbotDevice();
+    auto path = m_selectedDevicePath.isEmpty()
+        ? V4l2Backend::findObsbotDevice() : m_selectedDevicePath.toStdString();
     if (!path.empty()) {
         connectV4l2(path);
         return;
@@ -164,9 +188,12 @@ void CameraController::tryV4l2Fallback()
         m_v4l2ScanTimer = new QTimer(this);
         m_v4l2ScanTimer->setSingleShot(false);
         connect(m_v4l2ScanTimer, &QTimer::timeout, this, [this]() {
-            if (m_connected)
+            if (m_connected) {
+                m_v4l2ScanTimer->stop();
                 return;
-            auto path = V4l2Backend::findObsbotDevice();
+            }
+            auto path = m_selectedDevicePath.isEmpty()
+                ? V4l2Backend::findObsbotDevice() : m_selectedDevicePath.toStdString();
             if (!path.empty()) {
                 m_v4l2ScanTimer->stop();
                 connectV4l2(path);
@@ -209,9 +236,6 @@ void CameraController::connectV4l2(const std::string &devicePath)
     m_cameraInfo.connected = true;
 
     refreshV4l2ControlRanges();
-
-    m_v4l2.setWhiteBalanceAuto(false);
-    m_v4l2.setWhiteBalanceTemperature(kDefaultWhiteBalanceKelvin);
 
     emit cameraConnected(m_cameraInfo);
     updateV4l2State();
@@ -300,21 +324,29 @@ void CameraController::updateV4l2State()
 
 void CameraController::disconnectFromCamera()
 {
-    if (m_sdkDetectTimer)
-        m_sdkDetectTimer->stop();
-    if (m_connected) {
-        if (m_v4l2Only) {
-            m_v4l2.close();
-            m_v4l2Only = false;
-        } else {
-            m_device.reset();
+    if (m_sdkCallbackGuard) {
+        // Serialize callback dispatch with teardown, including callbacks already in flight.
+        {
+            std::lock_guard<std::mutex> lock(m_sdkCallbackGuard->mutex);
+            m_sdkCallbackGuard->controller = nullptr;
         }
-        m_connected = false;
-        m_cameraInfo.connected = false;
-        resetControlRanges();
-
-        emit cameraDisconnected();
+        Devices::get().setDevChangedCallback([](std::string, bool, void *) {}, nullptr);
+        m_sdkCallbackGuard.reset();
     }
+    if (m_sdkDetectTimer) m_sdkDetectTimer->stop();
+    if (m_v4l2ScanTimer) m_v4l2ScanTimer->stop();
+    m_settlingTimer->stop();
+    ++m_autoFramingGeneration;
+    m_pendingAiDeadline.setPreciseRemainingTime(0);
+    m_v4l2.close();
+    m_v4l2Only = false;
+    m_v4l2DevicePath.clear();
+    m_device.reset();
+    const bool wasConnected = m_connected;
+    m_connected = false;
+    m_cameraInfo.connected = false;
+    resetControlRanges();
+    if (wasConnected) emit cameraDisconnected();
 }
 
 QString CameraController::getVideoDevicePath() const
@@ -1080,11 +1112,9 @@ void CameraController::applyCurrentStateToCamera(const CameraState &uiState)
     m_currentState.exposure = uiState.exposure;
     m_currentState.iso = uiState.iso;
 
-    // Cache the intended state
-    m_cachedState = uiState;
-
     // Begin settling period - block status updates for 2 seconds
     beginSettling(2000);
+    m_cachedState = uiState;
 
     // Apply the current UI state to camera (respects user changes)
     if (isTiny2Family()) {

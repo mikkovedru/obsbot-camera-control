@@ -183,10 +183,18 @@ FilterPreviewWidget::FilterPreviewWidget(QWidget *parent)
 
 FilterPreviewWidget::~FilterPreviewWidget()
 {
+    // QOpenGLWidget destroys the context in its base destructor, after our members.
+    // Its signal must not call back into this partially destroyed derived object.
+    if (context()) {
+        disconnect(context(), &QOpenGLContext::aboutToBeDestroyed,
+                   this, &FilterPreviewWidget::handleContextAboutToBeDestroyed);
+    }
     if (isValid()) {
         makeCurrent();
-        cleanupGLResources();
-        doneCurrent();
+        if (QOpenGLContext::currentContext() == context()) {
+            cleanupGLResources();
+            doneCurrent();
+        }
     }
 }
 
@@ -218,6 +226,15 @@ void FilterPreviewWidget::updateVideoFrame(const QVideoFrame &frame)
     m_currentImage = image;
     m_textureDirty = true;
     m_emitPending = true;
+    // Wayland stops scheduling paints for hidden windows. Export frames when
+    // capture delivers them so virtual-camera output does not depend on repainting.
+    if (isValid()) {
+        makeCurrent();
+        if (QOpenGLContext::currentContext() == context()) {
+            processPendingFrame();
+            doneCurrent();
+        }
+    }
     update();
 }
 
@@ -248,6 +265,7 @@ void FilterPreviewWidget::resizeGL(int w, int h)
 
 void FilterPreviewWidget::paintGL()
 {
+    processPendingFrame();
     glClear(GL_COLOR_BUFFER_BIT);
 
     if (m_currentImage.isNull()) {
@@ -268,11 +286,27 @@ void FilterPreviewWidget::paintGL()
     m_program->setUniformValue("u_texelSize", QVector2D(1.0f / frameSize.width(), 1.0f / frameSize.height()));
     applyEffectsUniforms();
 
-    ensureFramebuffer(frameSize);
+    glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
+    renderToCurrentTarget(size(), true);
+    m_program->release();
+}
 
-    if (m_emitPending && m_framebuffer) {
+void FilterPreviewWidget::processPendingFrame()
+{
+    if (!m_emitPending || m_currentImage.isNull()) return;
+    ensureProgram();
+    ensureGeometry();
+    uploadTextureIfNeeded();
+    if (!m_program || !m_texture) return;
+
+    const QSize frameSize = m_currentImage.size();
+    m_program->bind();
+    m_program->setUniformValue("u_texelSize", QVector2D(1.0f / frameSize.width(), 1.0f / frameSize.height()));
+    applyEffectsUniforms();
+    ensureFramebuffer(frameSize);
+    if (m_framebuffer) {
         m_framebuffer->bind();
-        renderToCurrentTarget(frameSize);
+        renderToCurrentTarget(frameSize, false);
 
         QImage output(frameSize, QImage::Format_RGBA8888);
         glPixelStorei(GL_PACK_ALIGNMENT, 1);
@@ -284,7 +318,6 @@ void FilterPreviewWidget::paintGL()
         m_emitPending = false;
     }
 
-    renderToCurrentTarget(size());
     m_program->release();
 }
 
@@ -403,13 +436,14 @@ void FilterPreviewWidget::uploadTextureIfNeeded()
     m_textureDirty = false;
 }
 
-void FilterPreviewWidget::renderToCurrentTarget(const QSize &targetSize)
+void FilterPreviewWidget::renderToCurrentTarget(const QSize &targetSize, bool useDevicePixelRatio)
 {
     if (!m_program || !m_texture) {
         return;
     }
 
-    const qreal dpr = devicePixelRatioF();
+    // The export FBO already uses image pixels; only the on-screen surface uses DPR.
+    const qreal dpr = useDevicePixelRatio ? devicePixelRatioF() : 1.0;
     const QSize physicalSize = (QSizeF(targetSize) * dpr).toSize();
 
     glViewport(0, 0, physicalSize.width(), physicalSize.height());
@@ -474,6 +508,9 @@ void FilterPreviewWidget::handleContextAboutToBeDestroyed()
     }
 
     makeCurrent();
+    if (QOpenGLContext::currentContext() != context()) {
+        return;
+    }
     cleanupGLResources();
     doneCurrent();
 }

@@ -92,7 +92,8 @@ private:
     void ensureGeometry();
     void ensureFramebuffer(const QSize &size);
     void uploadTextureIfNeeded();
-    void renderToCurrentTarget(const QSize &targetSize);
+    void renderToCurrentTarget(const QSize &targetSize, bool useDevicePixelRatio);
+    void processPendingFrame();
     void applyEffectsUniforms();
     QVector3D srgbColorToLinearVec3(const QColor &color) const;
 

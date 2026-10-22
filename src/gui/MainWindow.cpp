@@ -463,11 +463,11 @@ void MainWindow::setupUI()
     scrollLayout->addWidget(m_tabWidget);
     m_effectsWidget->reset();
 
-    // Resize tab widget to fit the current tab (QTabWidget normally sizes to the tallest)
+    // Let the current page determine the tab's size, including newly shown controls.
     connect(m_tabWidget, &QTabWidget::currentChanged, this, [this](int) {
         fitTabToCurrentPage();
     });
-    QTimer::singleShot(0, this, &MainWindow::fitTabToCurrentPage);
+    fitTabToCurrentPage();
 
     QGroupBox *virtualCameraGroup = new QGroupBox(tr("Virtual Camera"), scrollContent);
     QVBoxLayout *virtualLayout = new QVBoxLayout(virtualCameraGroup);
@@ -1096,6 +1096,7 @@ void MainWindow::onPreviewWindowClosed()
 
 void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
 {
+    const auto generation = ++m_connectionGeneration;
     QString deviceText;
     if (info.version.isEmpty()) {
         deviceText = QString("✓ Connected:\n%1").arg(info.name);
@@ -1118,7 +1119,8 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
     // controller after this signal). Don't let those polls replace the UI state, i.e. the loaded
     // settings or the user's changes, with the camera's current state before it is applied.
     m_applyUiStatePending = !m_isCameraSwitch;
-    QTimer::singleShot(100, this, [this]() {
+    QTimer::singleShot(100, this, [this, generation]() {
+        if (generation != m_connectionGeneration || !m_controller->isConnected()) return;
         if (m_isCameraSwitch) {
             // Pull the new camera's actual state into the UI
             // without pushing the old camera's state back
@@ -1126,10 +1128,17 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
             onStateChanged(state);
             m_isCameraSwitch = false;
         } else {
-            const auto uiState = getUIState();
+            auto uiState = getUIState();
+            if (m_restoreSavedPosition) {
+                const auto &settings = m_controller->getConfig().getSettings();
+                uiState.pan = settings.pan;
+                uiState.tilt = settings.tilt;
+                uiState.zoom = settings.zoom;
+            }
             m_applyUiStatePending = false;
             m_controller->applyCurrentStateToCamera(uiState);
         }
+        m_restoreSavedPosition = false;
     });
 
     updateStatus();
@@ -1147,6 +1156,8 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
 
 void MainWindow::onCameraDisconnected()
 {
+    ++m_connectionGeneration;
+    m_applyUiStatePending = false;
     m_isCameraSwitch = false;
     m_deviceInfoLabel->setText("❌ Camera Disconnected");
     updateStatusBanner(false);
@@ -1174,17 +1185,16 @@ void MainWindow::onStateChanged(const CameraController::CameraState &state)
     // Update all widgets with new state
     m_trackingWidget->updateFromState(state);
     m_settingsWidget->updateFromState(state);
-
-    // Refit tab height — widget visibility may have changed (e.g. Tiny2 advanced controls)
-    fitTabToCurrentPage();
 }
 
 void MainWindow::fitTabToCurrentPage()
 {
-    QWidget *page = m_tabWidget->currentWidget();
-    if (!page) return;
-    m_tabWidget->setMaximumHeight(
-        page->sizeHint().height() + m_tabWidget->tabBar()->sizeHint().height());
+    const int current = m_tabWidget->currentIndex();
+    for (int i = 0; i < m_tabWidget->count(); ++i) {
+        const auto policy = i == current ? QSizePolicy::Preferred : QSizePolicy::Ignored;
+        m_tabWidget->widget(i)->setSizePolicy(policy, policy);
+    }
+    m_tabWidget->updateGeometry();
 }
 
 void MainWindow::onCommandFailed(const QString &description, int errorCode)
@@ -1516,6 +1526,7 @@ void MainWindow::changeEvent(QEvent *event)
         QWindowStateChangeEvent *stateEvent = static_cast<QWindowStateChangeEvent*>(event);
 
         if (windowState() & Qt::WindowMinimized) {
+            if (m_virtualCameraStreamer->isEnabled()) return;
             // Window is being minimized
 
             // Save preview state
@@ -1532,8 +1543,7 @@ void MainWindow::changeEvent(QEvent *event)
         } else if (stateEvent->oldState() & Qt::WindowMinimized) {
             // Window is being restored from minimized state
 
-            // ALWAYS reconnect to camera (regardless of preview state)
-            m_controller->connectToCamera();
+            if (!m_controller->isConnected()) m_controller->connectToCamera();
 
             // ONLY restore preview if it was enabled before minimize
             if (m_previewStateBeforeMinimize) {
@@ -1710,9 +1720,11 @@ void MainWindow::onCameraSelectorChanged(int index)
     static constexpr int kCameraSwitchDelayMs = 300;
 
     const QString devicePath = cam.devicePath;
-    m_isCameraSwitch = true;
     m_controller->disconnectFromCamera();
-    QTimer::singleShot(kCameraSwitchDelayMs, this, [this, devicePath]() {
+    m_isCameraSwitch = true;
+    const auto generation = ++m_connectionGeneration;
+    QTimer::singleShot(kCameraSwitchDelayMs, this, [this, devicePath, generation]() {
+        if (generation != m_connectionGeneration) return;
         m_controller->connectToCamera(devicePath);
     });
 }
@@ -1813,6 +1825,10 @@ void MainWindow::onTrayIconActivated(QSystemTrayIcon::ActivationReason reason)
 void MainWindow::onShowHideAction()
 {
     if (isVisible()) {
+        if (m_virtualCameraStreamer->isEnabled()) {
+            hide();
+            return;
+        }
         // Save preview state
         m_previewStateBeforeMinimize = m_previewWidget->isPreviewEnabled();
 
@@ -1826,8 +1842,7 @@ void MainWindow::onShowHideAction()
 
         hide();
     } else {
-        // ALWAYS reconnect to camera when restoring from tray
-        m_controller->connectToCamera();
+        if (!m_controller->isConnected()) m_controller->connectToCamera();
 
         // ONLY restore preview if it was enabled before hiding
         if (m_previewStateBeforeMinimize) {
