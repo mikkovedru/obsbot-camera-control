@@ -134,7 +134,7 @@ public:
 
     // Configuration
     bool loadConfig(std::vector<Config::ValidationError> &errors);
-    bool saveConfig();
+    bool saveConfig();  // Also stores the camera state while a camera is connected
     void applyConfigToCamera();  // Apply loaded config settings to camera
     void applyCurrentStateToCamera(const CameraState &uiState);  // Apply UI state to camera
     Config& getConfig() { return m_config; }

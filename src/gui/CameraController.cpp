@@ -986,8 +986,11 @@ bool CameraController::loadConfig(std::vector<Config::ValidationError> &errors)
 
 bool CameraController::saveConfig()
 {
-    // Update config with current camera state before saving
-    saveCurrentStateToConfig();
+    // Update config with current camera state before saving. Without a camera there is no state
+    // to save (m_currentState holds defaults until one connects), so keep the saved camera settings.
+    if (m_connected) {
+        saveCurrentStateToConfig();
+    }
     return m_config.save();
 }
 

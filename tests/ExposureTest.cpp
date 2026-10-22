@@ -57,6 +57,25 @@ int main(int argc, char **argv)
         require(reloaded.load(errors) && reloaded.getSettings().exposure == 42, "Exposure must round-trip");
     }
 
+    // App settings (e.g. the virtual camera frame rate) are saved through saveConfig(). Without a
+    // camera that must not replace the saved camera settings with the controller's defaults.
+    settings = controller.getConfig().getSettings();
+    settings.exposureAuto = false;
+    settings.iso = 10;
+    settings.focus = 45;
+    settings.virtualCameraMaxFps = 30;
+    controller.getConfig().setSettings(settings);
+    require(controller.saveConfig(), "Cannot save config without a camera");
+    {
+        Config reloaded;
+        std::vector<Config::ValidationError> errors;
+        require(reloaded.load(errors), "Cannot load config saved without a camera");
+        const auto saved = reloaded.getSettings();
+        require(!saved.exposureAuto && saved.exposure == 42 && saved.iso == 10 && saved.focus == 45,
+                "Saving without a camera must keep the saved camera settings");
+        require(saved.virtualCameraMaxFps == 30, "Saving without a camera must store app settings");
+    }
+
     // A raw V4L2 exposure value is not a shutter speed index
     const QString configPath = QString::fromStdString(controller.getConfig().getConfigPath());
     QFile file(configPath);
