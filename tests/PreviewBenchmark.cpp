@@ -99,6 +99,7 @@ int main(int argc, char **argv)
         pollTimer.start(2000);
     }
     if (parser.isSet("export")) {
+        preview.setFrameExportEnabled(true);
         QObject::connect(&preview, &FilterPreviewWidget::processedFrameReady,
                          [&](const QImage &) { if (measuring) ++exports; });
     }

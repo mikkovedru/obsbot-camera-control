@@ -463,6 +463,7 @@ void VirtualCameraStreamer::setEnabled(bool enabled)
             worker->setEnabled(enabledCopy);
         },
         Qt::QueuedConnection);
+    emit enabledChanged(enabled);
 }
 
 void VirtualCameraStreamer::setForcedResolution(const QSize &resolution)
@@ -589,7 +590,9 @@ void VirtualCameraStreamer::scheduleFrameDelivery(const QImage &frame)
 
 void VirtualCameraStreamer::handleWorkerStreamingStateChanged(bool enabled)
 {
+    if (m_enabled == enabled) return;
     m_enabled = enabled;
+    emit enabledChanged(enabled);
 }
 
 #include "VirtualCameraStreamer.moc"

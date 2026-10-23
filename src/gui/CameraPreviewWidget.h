@@ -2,6 +2,7 @@
 #define CAMERAPREVIEWWIDGET_H
 
 #include <QWidget>
+#include <QPointer>
 #include <QCamera>
 #include <QCameraFormat>
 #include "FilterPreviewWidget.h"
@@ -79,7 +80,7 @@ private:
     QComboBox *m_formatCombo;
     QLabel *m_statusLabel;
     QWidget *m_controlRow;
-    VirtualCameraStreamer *m_virtualCameraStreamer;
+    QPointer<VirtualCameraStreamer> m_virtualCameraStreamer;
     QString m_selectedFormatId;
     QString m_requestedDeviceId;
     QList<QCameraFormat> m_availableFormats;
@@ -87,6 +88,8 @@ private:
     bool m_previewEnabled;
     bool m_isApplyingFormat;
     QMetaObject::Connection m_snapshotConnection;
+    QMetaObject::Connection m_streamerStateConnection;
+    QMetaObject::Connection m_streamerDestroyedConnection;
 };
 
 #endif // CAMERAPREVIEWWIDGET_H

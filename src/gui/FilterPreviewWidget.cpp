@@ -207,6 +207,23 @@ void FilterPreviewWidget::setVideoEffects(const VideoEffectsSettings &settings)
     update();
 }
 
+void FilterPreviewWidget::setFrameExportEnabled(bool enabled)
+{
+    m_frameExportEnabled = enabled;
+    if (!enabled && !m_frameExportRequested) m_emitPending = false;
+}
+
+void FilterPreviewWidget::requestFrameExport()
+{
+    m_frameExportRequested = true;
+}
+
+void FilterPreviewWidget::cancelFrameExportRequest()
+{
+    m_frameExportRequested = false;
+    if (!m_frameExportEnabled) m_emitPending = false;
+}
+
 void FilterPreviewWidget::updateVideoFrame(const QVideoFrame &frame)
 {
     QVideoFrame copy(frame);
@@ -225,10 +242,10 @@ void FilterPreviewWidget::updateVideoFrame(const QVideoFrame &frame)
 
     m_currentImage = image;
     m_textureDirty = true;
-    m_emitPending = true;
+    m_emitPending = m_frameExportEnabled || m_frameExportRequested;
     // Wayland stops scheduling paints for hidden windows. Export frames when
     // capture delivers them so virtual-camera output does not depend on repainting.
-    if (isValid()) {
+    if (m_emitPending && isValid()) {
         makeCurrent();
         if (QOpenGLContext::currentContext() == context()) {
             processPendingFrame();
@@ -314,8 +331,9 @@ void FilterPreviewWidget::processPendingFrame()
                      GL_RGBA, GL_UNSIGNED_BYTE, output.bits());
         m_framebuffer->release();
 
-        emit processedFrameReady(flipVertical(output));
         m_emitPending = false;
+        m_frameExportRequested = false;
+        emit processedFrameReady(flipVertical(output));
     }
 
     m_program->release();

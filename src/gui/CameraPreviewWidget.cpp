@@ -190,7 +190,18 @@ void CameraPreviewWidget::setVirtualCameraStreamer(VirtualCameraStreamer *stream
         return;
     }
 
+    disconnect(m_streamerStateConnection);
+    disconnect(m_streamerDestroyedConnection);
     m_virtualCameraStreamer = streamer;
+    m_filterPreviewWidget->setFrameExportEnabled(streamer && streamer->isEnabled());
+    if (streamer) {
+        m_streamerStateConnection = connect(streamer, &VirtualCameraStreamer::enabledChanged,
+            m_filterPreviewWidget, &FilterPreviewWidget::setFrameExportEnabled);
+        m_streamerDestroyedConnection = connect(streamer, &QObject::destroyed,
+            m_filterPreviewWidget, [filter = m_filterPreviewWidget]() {
+                filter->setFrameExportEnabled(false);
+            });
+    }
 }
 
 void CameraPreviewWidget::setVideoEffects(const FilterPreviewWidget::VideoEffectsSettings &settings)
@@ -223,6 +234,7 @@ void CameraPreviewWidget::captureSnapshot()
                         disconnect(m_snapshotConnection);
                         emit snapshotCaptured(image);
                     });
+    m_filterPreviewWidget->requestFrameExport();
 }
 
 void CameraPreviewWidget::startPreview()
@@ -255,6 +267,7 @@ void CameraPreviewWidget::startPreview()
 void CameraPreviewWidget::stopPreview()
 {
     disconnect(m_snapshotConnection);
+    if (m_filterPreviewWidget) m_filterPreviewWidget->cancelFrameExportRequest();
 
     if (m_videoSink) {
         disconnect(m_videoSink, nullptr, this, nullptr);

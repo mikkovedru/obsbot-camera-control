@@ -64,6 +64,15 @@ int main(int argc, char **argv)
         QObject::connect(widget, &FilterPreviewWidget::processedFrameReady,
                          [&](const QImage &image) { output = image; ++emitted; });
         widget->updateVideoFrame(frame);
+        waitForEvents(30);
+        require(emitted == 0, "Ordinary preview must not export unused frames");
+        const QImage displayed = widget->grabFramebuffer();
+        require(!displayed.isNull(), "Preview must still render without export");
+        const QColor displayedRed = displayed.pixelColor(displayed.width() / 4, displayed.height() / 4);
+        require(displayedRed.red() > 250 && displayedRed.green() < 5 && displayedRed.blue() < 5,
+                "Preview must display the input image without exporting it");
+        widget->requestFrameExport();
+        widget->updateVideoFrame(frame);
         require(waitUntil([&output]() { return !output.isNull(); }),
                 "Preview must produce an exported frame before checking its dimensions");
         require(output.size() == input.size(), "Export must retain the full input dimensions");
@@ -75,13 +84,26 @@ int main(int argc, char **argv)
                     std::abs(pixel.blue() - expected.blue()) < 5,
                     "All four quadrants must survive high-DPI export without cropping");
         }
+        widget->updateVideoFrame(frame);
+        waitForEvents(30);
+        require(emitted == 1, "A snapshot request must export only one frame");
+        widget->requestFrameExport();
+        widget->cancelFrameExportRequest();
+        widget->updateVideoFrame(frame);
+        waitForEvents(30);
+        require(emitted == 1, "Cancelled snapshots must not export another frame");
+        widget->setFrameExportEnabled(true);
         widget->hide();
         waitForEvents(30);
         const int before = emitted;
         widget->updateVideoFrame(frame);
         require(emitted == before + 1, "Hidden preview must keep producing virtual-camera frames without paint events");
+        widget->setFrameExportEnabled(false);
+        widget->updateVideoFrame(frame);
+        waitForEvents(30);
+        require(emitted == before + 1, "Disabling virtual output must stop exports");
         delete widget;
         waitForEvents(10);
     }
-    qInfo("High-DPI export, hidden-window output, and repeated GL teardown passed");
+    qInfo("Demand-driven export, snapshots, high-DPI output, hidden streaming, and GL teardown passed");
 }

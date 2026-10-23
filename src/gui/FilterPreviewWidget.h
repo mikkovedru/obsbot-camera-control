@@ -78,6 +78,11 @@ public:
     void setVideoEffects(const VideoEffectsSettings &settings);
     VideoEffectsSettings videoEffects() const { return m_effectSettings; }
     void updateVideoFrame(const QVideoFrame &frame);
+    // Continuous CPU output for virtual cameras. Ordinary preview needs no readback.
+    void setFrameExportEnabled(bool enabled);
+    // Request one export from the next valid captured frame, independently of streaming.
+    void requestFrameExport();
+    void cancelFrameExportRequest();
 
 signals:
     void processedFrameReady(const QImage &frame);
@@ -103,6 +108,8 @@ private:
     QImage m_currentImage;
     bool m_textureDirty;
     bool m_emitPending;
+    bool m_frameExportEnabled = false;
+    bool m_frameExportRequested = false;
     VideoEffectsSettings m_effectSettings;
 
     std::unique_ptr<QOpenGLShaderProgram> m_program;

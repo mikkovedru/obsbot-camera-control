@@ -45,6 +45,7 @@ public slots:
     void onProcessedFrameReady(const QImage &frame);
 
 signals:
+    void enabledChanged(bool enabled);
     void errorOccurred(const QString &message);
 
 private slots:
