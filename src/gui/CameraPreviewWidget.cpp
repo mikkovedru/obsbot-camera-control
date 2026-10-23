@@ -237,7 +237,6 @@ void CameraPreviewWidget::startPreview()
         return;
     }
 
-    applySelectedFormat();
     updateStatus(tr("Opening camera..."));
 
     m_camera->start();
@@ -305,6 +304,11 @@ bool CameraPreviewWidget::initializeCamera()
             this, &CameraPreviewWidget::onCameraError);
     connect(m_camera, &QCamera::activeChanged,
             this, &CameraPreviewWidget::onCameraActiveChanged);
+
+    // Select the capture format before attaching the session. On Qt 6.4 with
+    // GStreamer/PipeWire, changing it after attachment can repeatedly renegotiate
+    // the default camera format and drop almost every frame.
+    applySelectedFormat();
 
     m_captureSession = new QMediaCaptureSession(this);
     m_captureSession->setCamera(m_camera);
