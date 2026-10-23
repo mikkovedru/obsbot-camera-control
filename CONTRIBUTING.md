@@ -86,3 +86,30 @@ src/
 ## SDK
 
 The OBSBOT SDK is a closed-source library — we get headers and a compiled `.so`, no source. If something doesn't work at the SDK level, we work around it. Check `sdk/include/dev/dev.hpp` for the API surface.
+
+### Preview timing benchmark
+
+Build the optional benchmark before changing the preview pipeline:
+
+```bash
+cmake -S . -B build -DOBSBOT_BUILD_BENCHMARKS=ON
+cmake --build build --target preview-benchmark
+./build/preview-benchmark --seconds 5 --output /tmp/preview-timing.json
+./build/preview-benchmark --camera --seconds 5
+./build/preview-benchmark --camera --session-first --seconds 8
+./build/preview-benchmark --camera --poll-camera-state --seconds 8
+```
+
+A display with OpenGL support is required. The default uses synthetic 1080p60
+frames. `--camera` briefly displays the connected OBSBOT feed without saving
+images or applying camera controls. `--poll-camera-state` adds the controller's
+read-only SDK polling after a longer warm-up. `--export` attaches a processed-frame
+consumer. `--session-first` reproduces the original application startup order
+by attaching the camera to the session before selecting its capture format.
+Use `--width`, `--height` and `--fps` to compare capture formats.
+
+The JSON records delivered and painted frame rates, delivery/paint p50 and p95,
+GUI timer gaps, and optional SDK poll times. Paint timings measure CPU submission,
+not completed GPU work. Compare the same source, size, display and build settings
+before and after each independent change. This benchmark is not an automatic test
+and cannot guarantee camera frame rate on other hardware.

@@ -107,6 +107,18 @@ set_target_properties(obsbot-cli PROPERTIES
 )
 
 include(CTest)
+option(OBSBOT_BUILD_BENCHMARKS "Build the interactive preview benchmark" OFF)
+if(OBSBOT_BUILD_BENCHMARKS)
+    add_executable(preview-benchmark tests/PreviewBenchmark.cpp src/gui/FilterPreviewWidget.cpp
+        src/gui/CameraController.cpp src/gui/V4l2Backend.cpp src/common/Config.cpp)
+    target_include_directories(preview-benchmark PRIVATE ${CMAKE_SOURCE_DIR}/src/gui
+        ${CMAKE_SOURCE_DIR}/src/common ${SDK_INCLUDE_DIR})
+    target_link_directories(preview-benchmark PRIVATE ${SDK_LIB_DIR})
+    target_link_libraries(preview-benchmark PRIVATE Qt6::Multimedia Qt6::OpenGLWidgets dev)
+    set_target_properties(preview-benchmark PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+        BUILD_RPATH "${SDK_LIB_DIR}")
+endif()
+
 if(BUILD_TESTING)
     add_executable(virtual-output-tests
         tests/VirtualCameraStreamerTest.cpp
